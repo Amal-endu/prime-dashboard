@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/Users/amalendu/Downloads/Sfx Workings/Claude Scripts/Prime Dashboard/app/api/details/trend\" \"/Users/amalendu/Downloads/Sfx Workings/Claude Scripts/Prime Dashboard/app/api/details/joined\")",
+      "Bash(node -e \"require\\('recharts'\\)\")",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/details/trend)",
+      "Bash(curl -s \"http://localhost:3000/api/details/trend\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:3000/api/details/joined?riderId=10082916&start=2026-05-12&end=2026-05-19\")",
+      "Bash(curl -s \"http://localhost:3000/api/details?date=today\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); r=[x for x in d['riders'] if x['delivered3MR']>0]; print\\(json.dumps\\(r[0], indent=2\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3000/api/details/joined?riderId=2925891&start=2026-05-12&end=2026-05-19\")",
+      "Bash(curl -s \"http://localhost:3000/api/details?date=today&mode=overall\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('mode:', d['mode']\\); print\\('cities:', len\\(d['cities']\\)\\); print\\('top city riders:', d['cities'][0]['city'], d['cities'][0]['ridersLoggedIn']\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)[:5] if isinstance\\(d,dict\\) else str\\(d\\)[:200]\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('cities:', len\\(d.get\\('cities',[]\\)\\), '| top:', d['cities'][0]['city'] if d.get\\('cities'\\) else 'none', d['cities'][0]['ridersLoggedIn'] if d.get\\('cities'\\) else 0\\)\")",
+      "Bash(curl -s \"http://localhost:3000/api/details?date=today&mode=3mr\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('3mr - cities:', len\\(d.get\\('cities',[]\\)\\), '| top:', d['cities'][0]['city'], d['cities'][0]['ridersLoggedIn']\\)\")",
+      "Bash(curl -s \"http://localhost:3000/api/details/trend?mode=overall\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('trend overall l7d[0]:', d['l7d'][0]\\)\")"
+    ],
+    "additionalDirectories": [
+      "/Users/amalendu/Downloads/Sfx Workings/Claude Scripts/Prime Dashboard/app/api/details"
+    ]
+  }
+}

@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Prime Dashboard — data files (large, regenerable via npm run ingest)
+*.duckdb
+*.csv
+graphify-out/
+.superpowers/
