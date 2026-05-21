@@ -54,11 +54,11 @@ export async function GET(request: Request) {
       FROM (
         SELECT
           TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          hub,
-          rider_id,
-          rider_name,
-          rider_tag,
-          client_name,
+          a.hub,
+          a.rider_id,
+          a.rider_name,
+          a.rider_tag,
+          a.client_name,
           hm2.city,
           hm2.zone,
           CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
@@ -99,11 +99,11 @@ export async function GET(request: Request) {
       FROM (
         SELECT
           TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          hub,
-          rider_id,
-          rider_name,
-          rider_tag,
-          client_name,
+          a.hub,
+          a.rider_id,
+          a.rider_name,
+          a.rider_tag,
+          a.client_name,
           hm2.city,
           hm2.zone,
           CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
@@ -142,11 +142,11 @@ export async function GET(request: Request) {
       FROM (
         SELECT
           TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          hub,
-          rider_id,
-          rider_name,
-          rider_tag,
-          client_name,
+          a.hub,
+          a.rider_id,
+          a.rider_name,
+          a.rider_tag,
+          a.client_name,
           hm2.city,
           hm2.zone,
           CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
@@ -189,11 +189,11 @@ export async function GET(request: Request) {
       FROM (
         SELECT
           TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          hub,
-          rider_id,
-          rider_name,
-          rider_tag,
-          client_name,
+          a.hub,
+          a.rider_id,
+          a.rider_name,
+          a.rider_tag,
+          a.client_name,
           hm2.city,
           hm2.zone,
           CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
@@ -213,7 +213,7 @@ export async function GET(request: Request) {
       WHERE 1=1
         ${behaviourClause} ${regularityClause} ${primeClause}
       GROUP BY COALESCE(d.city, 'Unmapped')`,
-      [mr3CutoffHour, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, ...filterParams],
+      [maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, mr3CutoffHour, ...filterParams],
     )
 
     // L30D trend: last 30 days DEL% vs previous 30 days DEL%, using the same filters as the table.
@@ -235,11 +235,11 @@ export async function GET(request: Request) {
       FROM (
         SELECT
           TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          hub,
-          rider_id,
-          rider_name,
-          rider_tag,
-          client_name,
+          a.hub,
+          a.rider_id,
+          a.rider_name,
+          a.rider_tag,
+          a.client_name,
           hm2.city,
           hm2.zone,
           CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
@@ -259,7 +259,7 @@ export async function GET(request: Request) {
       WHERE 1=1
         ${behaviourClause} ${regularityClause} ${primeClause}
       GROUP BY COALESCE(d.city, 'Unmapped')`,
-      [mr3CutoffHour, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, ...filterParams],
+      [maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, mr3CutoffHour, ...filterParams],
     )
 
     const toNum = (v: unknown) => v == null ? 0 : Number(v)
