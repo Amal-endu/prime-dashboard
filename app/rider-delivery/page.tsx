@@ -1,12 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, SlidersHorizontal, Loader2, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { ChevronRight, ChevronDown, SlidersHorizontal, Loader2 } from 'lucide-react'
 import { StatCard } from '@/components/stat-card'
 import { BehaviourBadge, RegularityBadge } from '@/components/profile-badges'
 import { DelPctCell } from '@/components/del-pct-cell'
+import { TrendDisplay } from '@/components/trend-display'
 import { formatPct, formatNumber } from '@/lib/utils'
 import type { LoginBehaviourTag, RegularityTag } from '@/lib/types'
+import { useConfigState } from '@/components/config-provider'
+import { useToast } from '@/components/toast-provider'
+import { toApiParams } from '@/lib/config-params'
 
 const BEHAVIOUR_OPTIONS: LoginBehaviourTag[] = ['Evening Rider', 'Cross Utilised', 'Morning Rider']
 const REGULARITY_OPTIONS: RegularityTag[] = ['Regular', 'Irregular', 'New Rider']
@@ -27,21 +31,9 @@ const DATE_PRESETS = [
 type CitySortCol = 'city' | 'orders3MR' | 'delivered3MR' | 'delPct' | 'breachCount' | 'breachPct' | 'trend7' | 'trend30'
 type SortDir = 'asc' | 'desc'
 
-function TrendCell({ delta }: { delta: number }) {
-  if (Math.abs(delta) < 0.5) return <span className="text-slate-400 text-xs flex items-center gap-0.5"><Minus className="w-3 h-3" />—</span>
-  if (delta > 0) return (
-    <span className="text-emerald-600 text-xs font-mono font-medium flex items-center gap-0.5">
-      <TrendingUp className="w-3 h-3" />+{delta.toFixed(1)}pp
-    </span>
-  )
-  return (
-    <span className="text-red-500 text-xs font-mono font-medium flex items-center gap-0.5">
-      <TrendingDown className="w-3 h-3" />{delta.toFixed(1)}pp
-    </span>
-  )
-}
-
 export default function RiderDeliveryPage() {
+  const { config, configVersion } = useConfigState()
+  const toast = useToast()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [datePreset, setDatePreset] = useState('today')
@@ -55,15 +47,17 @@ export default function RiderDeliveryPage() {
 
   useEffect(() => {
     setLoading(true)
+    toast.register()
     const params = new URLSearchParams({ date: datePreset })
     if (behaviourFilter !== 'all') params.set('behaviour', behaviourFilter)
     if (regularityFilter !== 'all') params.set('regularity', regularityFilter)
     if (primeOnly) params.set('prime', 'true')
+    Object.entries(toApiParams(config)).forEach(([k, v]) => params.set(k, v))
     fetch(`/api/delivery?${params}`)
       .then(r => r.json())
-      .then(d => { setData(d); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [datePreset, behaviourFilter, regularityFilter, primeOnly])
+      .then(d => { setData(d); setLoading(false); toast.completeOne() })
+      .catch(() => { setLoading(false); toast.failAll() })
+  }, [datePreset, behaviourFilter, regularityFilter, primeOnly, configVersion, config, toast])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })
@@ -124,15 +118,15 @@ export default function RiderDeliveryPage() {
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
         <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
-        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400">
+        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
           <option value="all">All Behaviours</option>
           {BEHAVIOUR_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400">
+        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
           <option value="all">All Regularity</option>
           {REGULARITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <button onClick={() => setPrimeOnly(p => !p)} className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${primeOnly ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'}`}>Prime Only</button>
+        <button onClick={() => setPrimeOnly(p => !p)} className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${primeOnly ? 'bg-sfx-orange text-white border-sfx-orange' : 'bg-white text-slate-600 border-slate-200 hover:border-sfx-orange-light'}`}>C2 Clients</button>
 
         {/* Date presets pushed to right */}
         <div className="ml-auto flex flex-wrap gap-1 justify-end">
@@ -140,7 +134,7 @@ export default function RiderDeliveryPage() {
             <button
               key={p.value}
               onClick={() => setDatePreset(p.value)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-sfx-orange text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               {p.label}
             </button>
@@ -159,7 +153,7 @@ export default function RiderDeliveryPage() {
               <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('breachCount')}>Breaches<SortIcon col="breachCount" /></th>
               <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('breachPct')}>Breach%<SortIcon col="breachPct" /></th>
               <th className="px-3 py-3 font-medium text-emerald-600 cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend7')}>L7D Trend<SortIcon col="trend7" /></th>
-              <th className="px-3 py-3 font-medium text-blue-600 cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend30')}>L30D Trend<SortIcon col="trend30" /></th>
+              <th className="px-3 py-3 font-medium text-sfx-orange-dark cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend30')}>L30D Trend<SortIcon col="trend30" /></th>
               <th className="px-3 py-3 font-medium text-slate-600">Behaviour</th>
               <th className="px-3 py-3 font-medium text-slate-600">Regularity</th>
             </tr></thead>
@@ -167,23 +161,23 @@ export default function RiderDeliveryPage() {
               {cities.map((city: any) => {
                 const cityHubs = hubs.filter((h: any) => h.city === city.city)
                 const cityExpanded = expandedCities.has(city.city)
-                return (<>
-                  <tr key={city.city} className="bg-slate-50 hover:bg-slate-100/80 cursor-pointer font-medium transition-colors" onClick={() => toggleCity(city.city)}>
+                return (<React.Fragment key={city.city}>
+                  <tr className="bg-slate-50 hover:bg-slate-100/80 cursor-pointer font-medium transition-colors" onClick={() => toggleCity(city.city)}>
                     <td className="px-4 py-3"><div className="flex items-center gap-2">{cityExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}<span>{city.city}</span></div></td>
                     <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(city.orders3MR)}</td>
                     <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(city.delivered3MR)}</td>
                     <td className="text-right px-3 py-3"><DelPctCell value={city.delPct} /></td>
                     <td className="text-right px-3 py-3 font-mono text-red-600 font-medium">{formatNumber(city.breachCount)}</td>
                     <td className="text-right px-3 py-3 font-mono text-red-500">{formatPct(city.breachPct)}</td>
-                    <td className="px-3 py-3"><TrendCell delta={city.trend7?.delta ?? 0} /></td>
-                    <td className="px-3 py-3"><TrendCell delta={city.trend30?.delta ?? 0} /></td>
+                    <td className="px-3 py-3"><TrendDisplay delta={city.trend7?.delta ?? 0} /></td>
+                    <td className="px-3 py-3"><TrendDisplay delta={city.trend30?.delta ?? 0} /></td>
                     <td colSpan={2} className="px-3 py-3 text-slate-300 text-xs">—</td>
                   </tr>
                   {cityExpanded && cityHubs.map((hub: any) => {
                     const hubRiders = riders.filter((r: any) => r.hub === hub.hub)
                     const hubExpanded = expandedHubs.has(hub.hub)
-                    return (<>
-                      <tr key={hub.hub} className="bg-white hover:bg-blue-50/40 cursor-pointer transition-colors" onClick={() => toggleHub(hub.hub)}>
+                    return (<React.Fragment key={hub.hub}>
+                      <tr className="bg-white hover:bg-sfx-orange/5 cursor-pointer transition-colors" onClick={() => toggleHub(hub.hub)}>
                         <td className="px-4 py-2.5 pl-10"><div className="flex items-center gap-2">{hubExpanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}<span className="font-medium text-slate-700">{hub.hub}</span></div></td>
                         <td className="text-right px-3 py-2.5 font-mono text-slate-600">{formatNumber(hub.orders3MR)}</td>
                         <td className="text-right px-3 py-2.5 font-mono text-slate-600">{formatNumber(hub.delivered3MR)}</td>
@@ -205,9 +199,9 @@ export default function RiderDeliveryPage() {
                           <td className="px-3 py-2.5"><RegularityBadge tag={rider.regularityTag} /></td>
                         </tr>
                       ))}
-                    </>)
+                    </React.Fragment>)
                   })}
-                </>)
+                </React.Fragment>)
               })}
               {/* Grand total */}
               <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
