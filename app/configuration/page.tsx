@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { RotateCcw, Save, CheckCircle2 } from 'lucide-react'
-import { loadConfig, saveConfig, defaultConfig } from '@/lib/utils'
+import { defaultConfig } from '@/lib/utils'
+import { useConfigState } from '@/components/config-provider'
 import type { Config } from '@/lib/types'
 
 interface FieldDef {
@@ -12,6 +13,7 @@ interface FieldDef {
   type: 'number' | 'text'
   min?: number
   max?: number
+  note?: string
 }
 
 const SECTIONS: { title: string; fields: FieldDef[] }[] = [
@@ -37,22 +39,19 @@ const SECTIONS: { title: string; fields: FieldDef[] }[] = [
     title: 'Data Rules',
     fields: [
       { key: 'mr3CutoffHour', label: '3MR Cutoff Hour (received_at_hub_time)', description: 'Hour at or after which a shipment is classified as 3MR (evening run). Default: 15', type: 'number', min: 0, max: 23 },
-      { key: 'attemptStatusCodes', label: 'Attempted Status Codes', description: 'Comma-separated list of latest_status values that count as an attempt. Default: DELIVERED, CID, NOT_CONTACTABLE', type: 'text' },
-      { key: 'breachFlagValues', label: 'Breach Flag Values', description: 'Comma-separated values in the Breach column that count as a breach. Default: true, 1, yes', type: 'text' },
+      { key: 'attemptStatusCodes', label: 'Attempted Status Codes', description: 'Comma-separated list of latest_status values that count as an attempt. Default: DELIVERED, CID, NOT_CONTACTABLE', type: 'text', note: 'Takes effect on next ingest' },
+      { key: 'breachFlagValues', label: 'Breach Flag Values', description: 'Comma-separated values in the Breach column that count as a breach. Default: true, 1, yes', type: 'text', note: 'Takes effect on next ingest' },
     ],
   },
 ]
 
 export default function ConfigurationPage() {
-  const [config, setConfig] = useState<Config>(defaultConfig())
+  const { config, setConfig, triggerSave } = useConfigState()
+  const [draft, setDraft] = useState<Config>(config)
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    setConfig(loadConfig())
-  }, [])
-
   function handleChange(key: keyof Config, value: string) {
-    setConfig(prev => {
+    setDraft(prev => {
       const field = SECTIONS.flatMap(s => s.fields).find(f => f.key === key)
       if (field?.type === 'number') {
         return { ...prev, [key]: Number(value) }
@@ -66,20 +65,20 @@ export default function ConfigurationPage() {
   }
 
   function handleSave() {
-    saveConfig(config)
+    triggerSave(draft)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
 
   function handleReset() {
     const d = defaultConfig()
+    setDraft(d)
     setConfig(d)
-    saveConfig(d)
     setSaved(false)
   }
 
   function displayValue(key: keyof Config): string {
-    const val = config[key]
+    const val = draft[key]
     if (Array.isArray(val)) return val.join(', ')
     return String(val)
   }
@@ -89,14 +88,14 @@ export default function ConfigurationPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Configuration</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Business rules and classification thresholds · Changes apply immediately across all views</p>
+          <p className="text-sm text-slate-500 mt-0.5">Display thresholds apply immediately · Data classification rules require re-ingest to update backend views</p>
         </div>
         <div className="flex gap-2">
           <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
             <RotateCcw className="w-3.5 h-3.5" />
             Reset Defaults
           </button>
-          <button onClick={handleSave} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${saved ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+          <button onClick={handleSave} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${saved ? 'bg-emerald-600 text-white' : 'bg-sfx-orange text-white hover:bg-sfx-orange-dark'}`}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
             {saved ? 'Saved' : 'Save Changes'}
           </button>
@@ -122,10 +121,13 @@ export default function ConfigurationPage() {
                     onChange={e => handleChange(field.key, e.target.value)}
                     min={field.min}
                     max={field.max}
-                    className="w-44 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 tabular-nums text-right"
+                    className="w-44 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light tabular-nums text-right"
                   />
                   {field.type === 'number' && field.min !== undefined && field.max !== undefined && (
                     <p className="text-xs text-slate-400 text-right mt-1">{field.min}–{field.max}</p>
+                  )}
+                  {field.note && (
+                    <p className="text-xs text-slate-400 text-right mt-1 italic">{field.note}</p>
                   )}
                 </div>
               </div>
