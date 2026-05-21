@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ConfigProvider } from "@/components/config-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { KpiStripLive } from "@/components/kpi-strip-live";
 import { TopNav } from "@/components/top-nav";
 
@@ -30,11 +32,15 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-slate-50">
-        <KpiStripLive />
-        <TopNav />
-        <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
-          {children}
-        </main>
+        <ConfigProvider>
+          <ToastProvider>
+            <KpiStripLive />
+            <TopNav />
+            <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
+              {children}
+            </main>
+          </ToastProvider>
+        </ConfigProvider>
       </body>
     </html>
   );
