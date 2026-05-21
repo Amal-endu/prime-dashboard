@@ -29,7 +29,7 @@ export function KpiStripLive() {
         setDemand({ totalDemand, total3MR, delivered3MR, delPct: total3MR > 0 ? delivered3MR / total3MR * 100 : 0 })
       }
     }).catch(() => {})
-  }, [configVersion, config])
+  }, [configVersion])
 
   return (
     <div className="bg-slate-900 text-white border-b border-slate-800">

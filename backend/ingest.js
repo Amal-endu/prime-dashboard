@@ -12,12 +12,12 @@ const path = require('path')
 const fs = require('fs')
 
 const ROOT = path.join(__dirname, '..')
-const DB_PATH = path.join(ROOT, 'prime.duckdb')
-const SDD_DIR = path.join('/Users/amalendu/Downloads/Sfx Workings/SDD_Data/May')
-const RAW_DATA_PATH = path.join(ROOT, 'raw_data.csv')
-const HUB_MAPPING_PATH = path.join(ROOT, 'hub_mapping.csv')
-const CPO_PATH = path.join(ROOT, 'CPO.csv')
-const PRIME_CLIENTS_PATH = path.join(ROOT, 'prime_clients.csv')
+const DB_PATH = process.env.DUCKDB_PATH || path.join(ROOT, 'prime.duckdb')
+const SDD_DIR = process.env.SDD_DATA_DIR || path.join(ROOT, 'SDD_Data', 'May')
+const RAW_DATA_PATH = process.env.RAW_DATA_PATH || path.join(ROOT, 'raw_data.csv')
+const HUB_MAPPING_PATH = process.env.HUB_MAPPING_PATH || path.join(ROOT, 'hub_mapping.csv')
+const CPO_PATH = process.env.CPO_PATH || path.join(ROOT, 'CPO.csv')
+const PRIME_CLIENTS_PATH = process.env.PRIME_CLIENTS_PATH || path.join(ROOT, 'prime_clients.csv')
 
 const db = new duckdb.Database(DB_PATH)
 const conn = db.connect()
@@ -102,8 +102,14 @@ async function createTables() {
       pod_mapping           VARCHAR,
       pod_zone              VARCHAR,
       city_id               INTEGER,
+      cluster_name          VARCHAR,
       PRIMARY KEY (awb_number)
     )
+  `)
+
+  // Add cluster_name column if table already exists without it (migration)
+  await run(`
+    ALTER TABLE sdd_awbs ADD COLUMN IF NOT EXISTS cluster_name VARCHAR
   `)
 
   // Ingest status tracker
@@ -229,7 +235,8 @@ async function loadSddFile(filePath) {
         END                                                                  AS breach,
         TRIM(pod_mapping)                                                    AS pod_mapping,
         TRIM(pod_zone)                                                       AS pod_zone,
-        TRY_CAST(city_id AS INTEGER)                                        AS city_id
+        TRY_CAST(city_id AS INTEGER)                                        AS city_id,
+        TRIM(cluster_name)                                                   AS cluster_name
       FROM read_csv('${filePath}', header=true, all_varchar=true)
       WHERE rider_id IS NOT NULL
         AND TRIM(rider_id) != ''
@@ -271,9 +278,12 @@ async function loadAllSddFiles() {
 async function createViews() {
   console.log('Creating analytical views...')
 
-  // max_date view — used everywhere as the analysis anchor
+  // max_date view — takes the true latest date across both data sources
   await run(`CREATE OR REPLACE VIEW v_max_date AS
-    SELECT MAX(date) AS max_date FROM rider_daily
+    SELECT GREATEST(
+      (SELECT MAX(date) FROM rider_daily),
+      (SELECT MAX(ofd_time::DATE) FROM sdd_awbs)
+    ) AS max_date
   `)
 
   // Rider summary over configurable window (default 30 days)
@@ -365,7 +375,7 @@ async function createViews() {
       hm.zone,
       hm.pod_name
     FROM classified c
-    LEFT JOIN hub_mapping hm ON c.hub = hm.hub
+    LEFT JOIN hub_mapping hm ON LOWER(c.hub) = LOWER(hm.hub)
   `)
 
   // 3MR delivery metrics per rider per date
@@ -385,7 +395,7 @@ async function createViews() {
       SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
       SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
     FROM sdd_awbs a
-    LEFT JOIN hub_mapping hm ON a.hub = hm.hub
+    LEFT JOIN hub_mapping hm ON LOWER(a.hub) = LOWER(hm.hub)
     LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
     WHERE HOUR(a.received_at_hub_time) >= 15
       AND a.ofd_time IS NOT NULL

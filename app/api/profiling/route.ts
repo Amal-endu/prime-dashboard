@@ -23,6 +23,8 @@ export async function GET(request: Request) {
       ...(regularity ? [regularity] : []),
     ]
 
+    const includeRiders = searchParams.get('riders') === '1'
+
     const windowDays       = parseWindowDays(searchParams.get('windowDays'),       30)
     const newRiderDays     = parseWindowDays(searchParams.get('newRiderDays'),       7)
     const eveningThreshold = parseThreshold(searchParams.get('eveningThreshold'),   80)
@@ -106,57 +108,85 @@ rider_summary AS (
   LEFT JOIN hub_mapping hm ON LOWER(c.hub) = LOWER(hm.hub)
 )`
 
+    // avg_daily_src: per-day login counts from rider_daily (basis for avg daily rider numbers)
+    // Classification tags from rider_summary (window-level) are joined for Regular/Irregular/New %
+    const avgDailyCte = `
+avg_daily_by_city AS (
+  SELECT
+    COALESCE(hm.city, 'Unmapped') AS city,
+    rd.date,
+    COUNT(DISTINCT rd.rider_id)::DOUBLE AS riders_that_day,
+    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS morning_that_day,
+    COUNT(DISTINCT CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS evening_that_day,
+    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL AND rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS cross_that_day
+  FROM rider_daily rd
+  CROSS JOIN (SELECT max_date FROM v_max_date) mx
+  LEFT JOIN hub_mapping hm ON LOWER(rd.hub) = LOWER(hm.hub)
+  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (?::INTEGER - 1) DAY) AND mx.max_date
+  GROUP BY hm.city, rd.date
+),
+avg_daily_by_hub AS (
+  SELECT
+    rd.hub,
+    COALESCE(hm.city, 'Unmapped') AS city,
+    rd.date,
+    COUNT(DISTINCT rd.rider_id)::DOUBLE AS riders_that_day,
+    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS morning_that_day,
+    COUNT(DISTINCT CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS evening_that_day,
+    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL AND rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS cross_that_day
+  FROM rider_daily rd
+  CROSS JOIN (SELECT max_date FROM v_max_date) mx
+  LEFT JOIN hub_mapping hm ON LOWER(rd.hub) = LOWER(hm.hub)
+  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (?::INTEGER - 1) DAY) AND mx.max_date
+  GROUP BY rd.hub, hm.city, rd.date
+)`
+
     const cityRows = await query<Record<string, unknown>>(
-      `WITH ${classifyCte}
+      `WITH ${classifyCte},
+      ${avgDailyCte}
       SELECT
-        COALESCE(city, 'Unmapped')                                            AS city,
-        COALESCE(zone, '—')                                                   AS zone,
-        COUNT(*)                                                              AS total_riders,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Evening Rider')         AS evening_count,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Cross Utilised')        AS cross_util_count,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Morning Rider')         AS morning_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'Regular')                    AS regular_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'Irregular')                  AS irregular_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'New Rider')                  AS new_rider_count,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Evening Rider')  * 100.0 / COUNT(*), 1) AS evening_pct,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Cross Utilised') * 100.0 / COUNT(*), 1) AS cross_util_pct,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Morning Rider')  * 100.0 / COUNT(*), 1) AS morning_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'Regular')             * 100.0 / COUNT(*), 1) AS regular_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'Irregular')           * 100.0 / COUNT(*), 1) AS irregular_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'New Rider')           * 100.0 / COUNT(*), 1) AS new_rider_pct
-      FROM rider_summary
-      WHERE 1=1 ${behaviourClause} ${regularityClause}
-      GROUP BY COALESCE(city, 'Unmapped'), COALESCE(zone, '—')
-      ORDER BY total_riders DESC`,
-      [...cfgParams, ...filterParams],
+        adc.city,
+        ROUND(AVG(adc.riders_that_day), 1)  AS avg_daily_riders,
+        ROUND(AVG(adc.morning_that_day), 1) AS avg_morning,
+        ROUND(AVG(adc.evening_that_day), 1) AS avg_evening,
+        ROUND(AVG(adc.cross_that_day), 1)   AS avg_cross,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Regular')   AS regular_count,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Irregular') AS irregular_count,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'New Rider') AS new_rider_count,
+        COUNT(DISTINCT rs.rider_id) AS total_unique_riders
+      FROM avg_daily_by_city adc
+      LEFT JOIN rider_summary rs ON COALESCE(rs.city, 'Unmapped') = adc.city
+        ${behaviourClause.replace('AND login_behaviour_tag', 'AND rs.login_behaviour_tag')}
+        ${regularityClause.replace('AND regularity_tag', 'AND rs.regularity_tag')}
+      GROUP BY adc.city
+      ORDER BY avg_daily_riders DESC`,
+      [...cfgParams, windowDays, windowDays, ...filterParams],
     )
 
     const hubRows = await query<Record<string, unknown>>(
-      `WITH ${classifyCte}
+      `WITH ${classifyCte},
+      ${avgDailyCte}
       SELECT
-        hub,
-        COALESCE(city, 'Unmapped')                                            AS city,
-        COUNT(*)                                                              AS total_riders,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Evening Rider')         AS evening_count,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Cross Utilised')        AS cross_util_count,
-        COUNT(*) FILTER (WHERE login_behaviour_tag = 'Morning Rider')         AS morning_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'Regular')                    AS regular_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'Irregular')                  AS irregular_count,
-        COUNT(*) FILTER (WHERE regularity_tag = 'New Rider')                  AS new_rider_count,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Evening Rider')  * 100.0 / COUNT(*), 1) AS evening_pct,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Cross Utilised') * 100.0 / COUNT(*), 1) AS cross_util_pct,
-        ROUND(COUNT(*) FILTER (WHERE login_behaviour_tag = 'Morning Rider')  * 100.0 / COUNT(*), 1) AS morning_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'Regular')             * 100.0 / COUNT(*), 1) AS regular_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'Irregular')           * 100.0 / COUNT(*), 1) AS irregular_pct,
-        ROUND(COUNT(*) FILTER (WHERE regularity_tag = 'New Rider')           * 100.0 / COUNT(*), 1) AS new_rider_pct
-      FROM rider_summary
-      WHERE 1=1 ${behaviourClause} ${regularityClause}
-      GROUP BY hub, COALESCE(city, 'Unmapped')
-      ORDER BY city, total_riders DESC`,
-      [...cfgParams, ...filterParams],
+        adh.hub,
+        adh.city,
+        ROUND(AVG(adh.riders_that_day), 1)  AS avg_daily_riders,
+        ROUND(AVG(adh.morning_that_day), 1) AS avg_morning,
+        ROUND(AVG(adh.evening_that_day), 1) AS avg_evening,
+        ROUND(AVG(adh.cross_that_day), 1)   AS avg_cross,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Regular')   AS regular_count,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Irregular') AS irregular_count,
+        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'New Rider') AS new_rider_count,
+        COUNT(DISTINCT rs.rider_id) AS total_unique_riders
+      FROM avg_daily_by_hub adh
+      LEFT JOIN rider_summary rs ON LOWER(rs.hub) = LOWER(adh.hub)
+        ${behaviourClause.replace('AND login_behaviour_tag', 'AND rs.login_behaviour_tag')}
+        ${regularityClause.replace('AND regularity_tag', 'AND rs.regularity_tag')}
+      GROUP BY adh.hub, adh.city
+      ORDER BY adh.city, avg_daily_riders DESC`,
+      [...cfgParams, windowDays, windowDays, ...filterParams],
     )
 
-    const riderRows = await query<Record<string, unknown>>(
+    const riderRows = includeRiders ? await query<Record<string, unknown>>(
       `WITH ${classifyCte}
       SELECT
         rider_id,
@@ -175,7 +205,7 @@ rider_summary AS (
       WHERE 1=1 ${behaviourClause} ${regularityClause}
       ORDER BY city NULLS LAST, hub, rider_id`,
       [...cfgParams, ...filterParams],
-    )
+    ) : []
 
     // Global KPI — always unfiltered (full picture across the dataset)
     const [kpi] = await query<Record<string, unknown>>(
@@ -229,40 +259,44 @@ rider_summary AS (
         newRiderCount: Number(kpi.new_rider_count),
       },
       matrix,
-      cities: cityRows.map(r => ({
-        city: r.city,
-        zone: r.zone,
-        totalRiders: Number(r.total_riders),
-        eveningCount: Number(r.evening_count),
-        crossUtilCount: Number(r.cross_util_count),
-        morningCount: Number(r.morning_count),
-        regularCount: Number(r.regular_count),
-        irregularCount: Number(r.irregular_count),
-        newRiderCount: Number(r.new_rider_count),
-        eveningRiderPct: Number(r.evening_pct),
-        crossUtilisedPct: Number(r.cross_util_pct),
-        morningRiderPct: Number(r.morning_pct),
-        regularPct: Number(r.regular_pct),
-        irregularPct: Number(r.irregular_pct),
-        newRiderPct: Number(r.new_rider_pct),
-      })),
-      hubs: hubRows.map(r => ({
-        hub: r.hub,
-        city: r.city,
-        totalRiders: Number(r.total_riders),
-        eveningCount: Number(r.evening_count),
-        crossUtilCount: Number(r.cross_util_count),
-        morningCount: Number(r.morning_count),
-        regularCount: Number(r.regular_count),
-        irregularCount: Number(r.irregular_count),
-        newRiderCount: Number(r.new_rider_count),
-        eveningRiderPct: Number(r.evening_pct),
-        crossUtilisedPct: Number(r.cross_util_pct),
-        morningRiderPct: Number(r.morning_pct),
-        regularPct: Number(r.regular_pct),
-        irregularPct: Number(r.irregular_pct),
-        newRiderPct: Number(r.new_rider_pct),
-      })),
+      cities: cityRows.map(r => {
+        const avg = Math.round(Number(r.avg_daily_riders))
+        const eve = Math.round(Number(r.avg_evening))
+        const crs = Math.round(Number(r.avg_cross))
+        const mor = Math.round(Number(r.avg_morning))
+        const uniq = Number(r.total_unique_riders)
+        return {
+          city: r.city, zone: '—',
+          totalRiders: avg, eveningCount: eve, crossUtilCount: crs, morningCount: mor,
+          regularCount: Number(r.regular_count), irregularCount: Number(r.irregular_count), newRiderCount: Number(r.new_rider_count),
+          totalUniqueRiders: uniq,
+          eveningRiderPct: avg > 0 ? Math.round(eve / avg * 1000) / 10 : 0,
+          crossUtilisedPct: avg > 0 ? Math.round(crs / avg * 1000) / 10 : 0,
+          morningRiderPct:  avg > 0 ? Math.round(mor / avg * 1000) / 10 : 0,
+          regularPct:  uniq > 0 ? Math.round(Number(r.regular_count)  / uniq * 1000) / 10 : 0,
+          irregularPct: uniq > 0 ? Math.round(Number(r.irregular_count) / uniq * 1000) / 10 : 0,
+          newRiderPct: uniq > 0 ? Math.round(Number(r.new_rider_count)  / uniq * 1000) / 10 : 0,
+        }
+      }),
+      hubs: hubRows.map(r => {
+        const avg = Math.round(Number(r.avg_daily_riders))
+        const eve = Math.round(Number(r.avg_evening))
+        const crs = Math.round(Number(r.avg_cross))
+        const mor = Math.round(Number(r.avg_morning))
+        const uniq = Number(r.total_unique_riders)
+        return {
+          hub: r.hub, city: r.city,
+          totalRiders: avg, eveningCount: eve, crossUtilCount: crs, morningCount: mor,
+          regularCount: Number(r.regular_count), irregularCount: Number(r.irregular_count), newRiderCount: Number(r.new_rider_count),
+          totalUniqueRiders: uniq,
+          eveningRiderPct: avg > 0 ? Math.round(eve / avg * 1000) / 10 : 0,
+          crossUtilisedPct: avg > 0 ? Math.round(crs / avg * 1000) / 10 : 0,
+          morningRiderPct:  avg > 0 ? Math.round(mor / avg * 1000) / 10 : 0,
+          regularPct:  uniq > 0 ? Math.round(Number(r.regular_count)  / uniq * 1000) / 10 : 0,
+          irregularPct: uniq > 0 ? Math.round(Number(r.irregular_count) / uniq * 1000) / 10 : 0,
+          newRiderPct: uniq > 0 ? Math.round(Number(r.new_rider_count)  / uniq * 1000) / 10 : 0,
+        }
+      }),
       riders: riderRows.map(r => ({
         riderId: String(r.rider_id),
         riderName: r.rider_name,

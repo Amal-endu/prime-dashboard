@@ -45,6 +45,8 @@ export default function RiderProfilingPage() {
   const { config, configVersion } = useConfigState()
   const toast = useToast()
   const [data, setData] = useState<ApiData | null>(null)
+  const [riders, setRiders] = useState<RiderData[]>([])
+  const [ridersLoading, setRidersLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedCities, setExpandedCities] = useState<Set<string>>(new Set())
@@ -57,6 +59,7 @@ export default function RiderProfilingPage() {
   const [sortCol, setSortCol] = useState<SortCol>('totalRiders')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
+  // Phase 1: fetch summary (kpi + matrix + cities + hubs) — fast, renders the table immediately
   useEffect(() => {
     setLoading(true)
     toast.register()
@@ -68,7 +71,21 @@ export default function RiderProfilingPage() {
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); toast.completeOne() })
       .catch(e => { setError(e.message); setLoading(false); toast.failAll() })
-  }, [behaviourFilter, regularityFilter, configVersion, config, toast])
+  }, [behaviourFilter, regularityFilter, configVersion])
+
+  // Phase 2: fetch riders in the background — unblocks initial render
+  useEffect(() => {
+    setRidersLoading(true)
+    setRiders([])
+    const params = new URLSearchParams({ riders: '1' })
+    if (behaviourFilter !== 'all') params.set('behaviour', behaviourFilter)
+    if (regularityFilter !== 'all') params.set('regularity', regularityFilter)
+    Object.entries(toApiParams(config)).forEach(([k, v]) => params.set(k, v))
+    fetch(`/api/profiling?${params}`)
+      .then(r => r.json())
+      .then(d => { setRiders(d.riders ?? []); setRidersLoading(false) })
+      .catch(() => setRidersLoading(false))
+  }, [behaviourFilter, regularityFilter, configVersion])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })
@@ -77,7 +94,7 @@ export default function RiderProfilingPage() {
   if (loading) return <div className="flex items-center gap-2 text-slate-500 py-16 justify-center"><Loader2 className="w-5 h-5 animate-spin" />Loading rider profiles...</div>
   if (error || !data) return <div className="text-red-600 py-8">Error: {error}</div>
 
-  const { kpi, cities, hubs, riders } = data
+  const { kpi, cities, hubs } = data
   const total = kpi.totalRiders
 
   const filteredRiders = riders.filter(r =>
@@ -168,7 +185,9 @@ export default function RiderProfilingPage() {
         {showAll
           ? `${formatNumber(total)} riders · ${displayCities.length} cities`
           : hasSearchFilter
-            ? `${formatNumber(filteredRiders.length)} of ${formatNumber(total)} riders matching search · ${displayCities.length} cities shown`
+            ? ridersLoading
+              ? `Searching… · ${displayCities.length} cities shown`
+              : `${formatNumber(filteredRiders.length)} of ${formatNumber(total)} riders matching search · ${displayCities.length} cities shown`
             : `${formatNumber(total)} riders (filtered) · ${displayCities.length} cities`}
       </p>
 
@@ -178,9 +197,9 @@ export default function RiderProfilingPage() {
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="text-left px-4 py-3 font-medium text-slate-500 uppercase tracking-wide w-60 cursor-pointer select-none" onClick={() => toggleSort('city')}>City / Hub / Rider<SortIcon col="city" /></th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('totalRiders')}>Riders<SortIcon col="totalRiders" /></th>
+                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('totalRiders')}>Avg/Day<SortIcon col="totalRiders" /></th>
                 <th className="text-right px-3 py-3 font-medium text-indigo-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('eveningCount')}>Evening{showPct ? ' %' : ''}<SortIcon col="eveningCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-violet-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('crossUtilCount')}>Cross Util{showPct ? ' %' : ''}<SortIcon col="crossUtilCount" /></th>
+                <th className="text-right px-3 py-3 font-medium text-violet-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('crossUtilCount')}>Cross{showPct ? ' %' : ''}<SortIcon col="crossUtilCount" /></th>
                 <th className="text-right px-3 py-3 font-medium text-orange-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('morningCount')}>Morning{showPct ? ' %' : ''}<SortIcon col="morningCount" /></th>
                 <th className="text-right px-3 py-3 font-medium text-emerald-600 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('regularCount')}>Regular{showPct ? ' %' : ''}<SortIcon col="regularCount" /></th>
                 <th className="text-right px-3 py-3 font-medium text-amber-600 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('irregularCount')}>Irregular{showPct ? ' %' : ''}<SortIcon col="irregularCount" /></th>
@@ -205,6 +224,7 @@ export default function RiderProfilingPage() {
                     expandedRiders={expandedRiders}
                     hubMap={hubMap}
                     riders={riders}
+                    ridersLoading={ridersLoading}
                     showAll={showAll}
                     showPct={showPct}
                     fmt={fmt}
@@ -241,6 +261,7 @@ interface CityGroupProps {
   expandedRiders: Set<string>
   hubMap: Map<string, RiderData[]>
   riders: RiderData[]
+  ridersLoading: boolean
   showAll: boolean
   showPct: boolean
   fmt: (count: number, pct: number) => string
@@ -251,7 +272,7 @@ interface CityGroupProps {
 
 function CityGroup({
   city, cityHubs, cityExpanded, expandedHubs, expandedRiders,
-  hubMap, riders, showAll, fmt,
+  hubMap, riders, ridersLoading, showAll, fmt,
   onToggleCity, onToggleHub, onToggleRider,
 }: CityGroupProps) {
   return (
@@ -283,6 +304,7 @@ function CityGroup({
             hub={hub}
             hubRiders={hubRiders}
             hubExpanded={hubExpanded}
+            ridersLoading={ridersLoading}
             expandedRiders={expandedRiders}
             fmt={fmt}
             onToggleHub={onToggleHub}
@@ -298,13 +320,14 @@ interface HubGroupProps {
   hub: HubData
   hubRiders: RiderData[]
   hubExpanded: boolean
+  ridersLoading: boolean
   expandedRiders: Set<string>
   fmt: (count: number, pct: number) => string
   onToggleHub: (hub: string) => void
   onToggleRider: (riderId: string) => void
 }
 
-function HubGroup({ hub, hubRiders, hubExpanded, expandedRiders, fmt, onToggleHub, onToggleRider }: HubGroupProps) {
+function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, fmt, onToggleHub, onToggleRider }: HubGroupProps) {
   return (
     <>
       <tr className="bg-white hover:bg-sfx-orange/5 cursor-pointer transition-colors" onClick={() => onToggleHub(hub.hub)}>
@@ -325,7 +348,10 @@ function HubGroup({ hub, hubRiders, hubExpanded, expandedRiders, fmt, onToggleHu
         <td colSpan={4} className="px-3 py-2.5 text-slate-300 text-[10px]">—</td>
       </tr>
 
-      {hubExpanded && hubRiders.map(rider => (
+      {hubExpanded && ridersLoading && (
+        <tr><td colSpan={12} className="px-4 py-3 pl-16 text-xs text-slate-400 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin inline-block mr-1" />Loading riders…</td></tr>
+      )}
+      {hubExpanded && !ridersLoading && hubRiders.map(rider => (
         <RiderRowGroup
           key={`rider-${rider.riderId}`}
           rider={rider}

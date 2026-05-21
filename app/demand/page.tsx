@@ -43,7 +43,7 @@ export default function DemandPage() {
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); toast.completeOne() })
       .catch(() => { setLoading(false); toast.failAll() })
-  }, [subView, primeOnly, configVersion, config, toast])
+  }, [subView, primeOnly, configVersion])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
 

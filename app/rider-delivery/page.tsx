@@ -57,7 +57,7 @@ export default function RiderDeliveryPage() {
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); toast.completeOne() })
       .catch(() => { setLoading(false); toast.failAll() })
-  }, [datePreset, behaviourFilter, regularityFilter, primeOnly, configVersion, config, toast])
+  }, [datePreset, behaviourFilter, regularityFilter, primeOnly, configVersion])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })

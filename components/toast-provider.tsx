@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 
 type ToastState = 'idle' | 'refreshing' | 'success' | 'error'
@@ -43,6 +43,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     totalRef.current = 0
     completedRef.current = 0
     startTimeRef.current = Date.now()
+    stateRef.current = 'refreshing'
     setState('refreshing')
     setProgress(0)
     setShowProgress(false)
@@ -55,11 +56,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     }, 5000)
   }, [clearTimers])
 
+  const stateRef = useRef<ToastState>('idle')
+
   const register = useCallback(() => {
+    if (stateRef.current !== 'refreshing') return
     totalRef.current += 1
   }, [])
 
   const completeOne = useCallback(() => {
+    if (stateRef.current !== 'refreshing') return
     completedRef.current += 1
     const pct = totalRef.current > 0
       ? Math.round((completedRef.current / totalRef.current) * 100)
@@ -69,14 +74,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     if (completedRef.current >= totalRef.current && totalRef.current > 0) {
       clearTimers()
       setShowProgress(false)
+      stateRef.current = 'success'
       setState('success')
-      dismissTimerRef.current = setTimeout(() => setState('idle'), 2000)
+      dismissTimerRef.current = setTimeout(() => { stateRef.current = 'idle'; setState('idle') }, 2000)
     }
   }, [clearTimers])
 
   const failAll = useCallback(() => {
+    if (stateRef.current !== 'refreshing') return
     clearTimers()
     setShowProgress(false)
+    stateRef.current = 'error'
     setState('error')
   }, [clearTimers])
 
@@ -86,59 +94,56 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => () => clearTimers(), [clearTimers])
 
-  const value = { startRefresh, register, completeOne, failAll, retry }
-
-  if (state === 'idle') {
-    return (
-      <ToastContext.Provider value={value}>
-        {children}
-      </ToastContext.Provider>
-    )
-  }
+  const value = useMemo(
+    () => ({ startRefresh, register, completeOne, failAll, retry }),
+    [startRefresh, register, completeOne, failAll, retry],
+  )
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-5 right-5 z-50 w-72 rounded-xl border shadow-lg text-sm font-medium">
-        {state === 'refreshing' && showProgress && (
-          <div className="bg-white border-slate-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-slate-700 mb-2">
-              <Loader2 className="w-4 h-4 animate-spin text-sfx-orange shrink-0" />
-              <span>Refreshing data… {progress}%</span>
-            </div>
-            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-sfx-orange rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {state === 'success' && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-emerald-700">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Configuration applied</span>
-            </div>
-          </div>
-        )}
-        {state === 'error' && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <div className="flex items-center justify-between gap-2 text-red-700">
-              <div className="flex items-center gap-2">
-                <XCircle className="w-4 h-4 shrink-0" />
-                <span>Failed to apply config</span>
+      {state !== 'idle' && (
+        <div className="fixed bottom-5 right-5 z-50 w-72 rounded-xl border shadow-lg text-sm font-medium">
+          {state === 'refreshing' && showProgress && (
+            <div className="bg-white border-slate-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-slate-700 mb-2">
+                <Loader2 className="w-4 h-4 animate-spin text-sfx-orange shrink-0" />
+                <span>Refreshing data… {progress}%</span>
               </div>
-              <button
-                onClick={retry}
-                className="text-xs underline text-red-600 hover:text-red-800 shrink-0"
-              >
-                Retry
-              </button>
+              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-sfx-orange rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+          {state === 'success' && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-emerald-700">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>Configuration applied</span>
+              </div>
+            </div>
+          )}
+          {state === 'error' && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <div className="flex items-center justify-between gap-2 text-red-700">
+                <div className="flex items-center gap-2">
+                  <XCircle className="w-4 h-4 shrink-0" />
+                  <span>Failed to apply config</span>
+                </div>
+                <button
+                  onClick={retry}
+                  className="text-xs underline text-red-600 hover:text-red-800 shrink-0"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </ToastContext.Provider>
   )
 }
