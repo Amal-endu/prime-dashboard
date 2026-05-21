@@ -3,11 +3,17 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --sfx-orange: #FF6200;
+  --sfx-orange-d: #E85800;
+  --sfx-orange-l: #FF8534;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-sfx-orange: var(--sfx-orange);
+  --color-sfx-orange-dark: var(--sfx-orange-d);
+  --color-sfx-orange-light: var(--sfx-orange-l);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

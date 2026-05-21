@@ -1,9 +1,9 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { LayoutDashboard } from 'lucide-react'
 
 const tabs = [
   { label: 'Rider Profiling', href: '/' },
@@ -19,11 +19,18 @@ export function TopNav() {
   return (
     <nav className="bg-white border-b border-slate-200 sticky top-0 z-40">
       <div className="flex items-center px-6 h-14 gap-8">
-        <div className="flex items-center gap-2 mr-4 shrink-0">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <LayoutDashboard className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-semibold text-slate-900 text-sm tracking-tight">Prime Dashboard</span>
+        <div className="flex items-center gap-3 mr-4 shrink-0">
+          <Image
+            src="/shadowfax-logo.svg"
+            alt="Shadowfax"
+            width={130}
+            height={28}
+            priority
+            className="h-7 w-auto"
+          />
+          <span className="font-semibold text-slate-900 text-sm tracking-tight border-l border-slate-200 pl-3">
+            Prime Dashboard
+          </span>
         </div>
         <div className="flex items-center gap-1 h-full">
           {tabs.map((tab) => {
@@ -37,13 +44,13 @@ export function TopNav() {
                 className={cn(
                   'relative flex items-center px-4 h-full text-sm font-medium transition-colors',
                   isActive
-                    ? 'text-blue-600'
+                    ? 'text-sfx-orange'
                     : 'text-slate-500 hover:text-slate-900'
                 )}
               >
                 {tab.label}
                 {isActive && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-t-full" />
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-sfx-orange rounded-t-full" />
                 )}
               </Link>
             )

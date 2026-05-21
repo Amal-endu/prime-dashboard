@@ -1,15 +1,19 @@
 export const runtime = 'nodejs'
+export const revalidate = 60
 import { NextResponse } from 'next/server'
 import { query } from '@/backend/db'
+import { apiError } from '@/lib/validators'
 
 export async function GET() {
   try {
-    const [{ max_date }] = await query('SELECT max_date FROM v_max_date')
-    const [{ total_awbs }] = await query('SELECT COUNT(*) AS total_awbs FROM sdd_awbs')
-    const [{ total_riders }] = await query('SELECT COUNT(DISTINCT rider_id) AS total_riders FROM rider_daily')
-    const logs = await query('SELECT filename, ingested_at FROM ingest_log ORDER BY ingested_at DESC LIMIT 5')
+    const [{ max_date }] = await query<{ max_date: string }>('SELECT max_date FROM v_max_date')
+    const [{ total_awbs }] = await query<{ total_awbs: number }>('SELECT COUNT(*) AS total_awbs FROM sdd_awbs')
+    const [{ total_riders }] = await query<{ total_riders: number }>('SELECT COUNT(DISTINCT rider_id) AS total_riders FROM rider_daily')
+    const logs = await query<{ filename: string; ingested_at: string }>(
+      'SELECT filename, ingested_at FROM ingest_log ORDER BY ingested_at DESC LIMIT 5',
+    )
 
-    const date = new Date(max_date as string)
+    const date = new Date(max_date)
     const formatted = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 
     return NextResponse.json({
@@ -20,6 +24,8 @@ export async function GET() {
       recentIngests: logs.map(l => ({ filename: l.filename, ingestedAt: l.ingested_at })),
     })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[API /status]', err)
+    const { status, body } = apiError(err)
+    return NextResponse.json(body, { status })
   }
 }

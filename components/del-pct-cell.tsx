@@ -1,7 +1,7 @@
 'use client'
 
 import { cn, formatPct } from '@/lib/utils'
-import { defaultConfig } from '@/lib/utils'
+import { useConfig } from '@/components/config-provider'
 
 interface DelPctCellProps {
   value: number
@@ -9,7 +9,7 @@ interface DelPctCellProps {
 }
 
 export function DelPctCell({ value, className }: DelPctCellProps) {
-  const config = defaultConfig()
+  const config = useConfig()
   const colorClass =
     value >= config.delPctGreenThreshold
       ? 'text-emerald-600'

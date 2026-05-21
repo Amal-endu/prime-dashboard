@@ -10,7 +10,7 @@ const behaviourStyles: Record<LoginBehaviourTag, string> = {
 const regularityStyles: Record<RegularityTag, string> = {
   'Regular': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'Irregular': 'bg-amber-50 text-amber-700 border-amber-200',
-  'New Rider': 'bg-blue-50 text-blue-700 border-blue-200',
+  'New Rider': 'bg-sky-50 text-sky-700 border-sky-200',
 }
 
 const sourceStyles: Record<SourceRiderTag, string> = {

@@ -9,7 +9,8 @@ const chokidar = require('chokidar')
 const path = require('path')
 const { exec } = require('child_process')
 
-const SDD_DIR = '/Users/amalendu/Downloads/Sfx Workings/SDD_Data/May'
+const ROOT = path.join(__dirname, '..')
+const SDD_DIR = process.env.SDD_DATA_DIR || path.join(ROOT, 'SDD_Data', 'May')
 const INGEST_SCRIPT = path.join(__dirname, 'ingest.js')
 
 console.log(`[watcher] Watching ${SDD_DIR}`)
