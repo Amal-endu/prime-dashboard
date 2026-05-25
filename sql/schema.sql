@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS prime_clients (
 
 CREATE TABLE IF NOT EXISTS rider_daily (
   date                   DATE    NOT NULL,
-  rider_id               TEXT    NOT NULL,
+  rider_id               INTEGER NOT NULL,
   hub                    TEXT    NOT NULL,
   rider_name             TEXT,
   morning_runsheet_hour  SMALLINT,
@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS rider_daily_date_idx  ON rider_daily (date);
 
 CREATE TABLE IF NOT EXISTS rider_day_shipments (
   date                  DATE    NOT NULL,
-  rider_id              TEXT    NOT NULL,
+  rider_id              INTEGER NOT NULL,
   hub                   TEXT    NOT NULL,
   assigned_3mr          INTEGER NOT NULL DEFAULT 0,
   attempted_3mr         INTEGER NOT NULL DEFAULT 0,
@@ -252,7 +252,7 @@ CREATE OR REPLACE FUNCTION classify_riders(
   p_cross_threshold   NUMERIC DEFAULT 70,
   p_regular_threshold NUMERIC DEFAULT 80
 ) RETURNS TABLE (
-  rider_id              TEXT,
+  rider_id              INTEGER,
   rider_name            TEXT,
   hub                   TEXT,
   city                  TEXT,
