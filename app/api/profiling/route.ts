@@ -117,7 +117,8 @@ raw_metrics AS (
     rd.evening_runsheet_hour,
     rd.attempt_morning,
     rd.attempt_evening
-  FROM rider_daily rd, anchor
+  FROM rider_daily rd
+  CROSS JOIN anchor
   LEFT JOIN hub_mapping hm ON LOWER(rd.hub) = LOWER(hm.hub)
   WHERE rd.date BETWEEN (anchor.anchor_date - ((SELECT window_days FROM cfg) - 1) * INTERVAL '1 day')::DATE
                     AND anchor.anchor_date
