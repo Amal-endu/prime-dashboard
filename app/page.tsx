@@ -24,7 +24,7 @@ interface CityData {
 }
 interface HubData extends CityData { hub: string }
 interface RiderData {
-  riderId: string; riderName: string; hub: string; city: string
+  riderId: number; riderName: string; hub: string; city: string
   loginBehaviourTag: LoginBehaviourTag; regularityTag: RegularityTag
   loginRatePct: number; morningLogins: number; eveningLogins: number
   firstLoginDate: string; activeSinceDays: number
@@ -53,7 +53,7 @@ export default function RiderProfilingPage() {
   const [error, setError] = useState<string | null>(null)
   const [expandedCities, setExpandedCities] = useState<Set<string>>(new Set())
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set())
-  const [expandedRiders, setExpandedRiders] = useState<Set<string>>(new Set())
+  const [expandedRiders, setExpandedRiders] = useState<Set<number>>(new Set())
   const [search, setSearch] = useState('')
   const [behaviourFilter, setBehaviourFilter] = useState<string>('all')
   const [regularityFilter, setRegularityFilter] = useState<string>('all')
@@ -91,7 +91,7 @@ export default function RiderProfilingPage() {
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })
-  const toggleRider = (riderId: string) => setExpandedRiders(prev => { const n = new Set(prev); n.has(riderId) ? n.delete(riderId) : n.add(riderId); return n })
+  const toggleRider = (riderId: number) => setExpandedRiders(prev => { const n = new Set(prev); n.has(riderId) ? n.delete(riderId) : n.add(riderId); return n })
 
   if (loading) return <div className="flex items-center gap-2 text-slate-500 py-16 justify-center"><Loader2 className="w-5 h-5 animate-spin" />Loading rider profiles...</div>
   if (error || !data) return <div className="text-red-600 py-8">Error: {error}</div>
@@ -100,7 +100,7 @@ export default function RiderProfilingPage() {
   const total = kpi.totalRiders
 
   const filteredRiders = riders.filter(r =>
-    !search || r.riderName.toLowerCase().includes(search.toLowerCase()) || r.riderId.toLowerCase().includes(search.toLowerCase()),
+    !search || r.riderName.toLowerCase().includes(search.toLowerCase()) || String(r.riderId).includes(search),
   )
 
   const hubMap = new Map<string, typeof filteredRiders>()
@@ -167,7 +167,7 @@ export default function RiderProfilingPage() {
           formatNumber(hub.totalRiders), formatNumber(hub.eveningCount), formatNumber(hub.crossUtilCount),
           formatNumber(hub.morningCount), hub.avgMorningAtp?.toFixed(1) ?? '—', hub.avgEveningAtp?.toFixed(1) ?? '—', ''])
         for (const rider of riders.filter(r => r.hub === hub.hub && (cityFilter ? r.city === cityFilter : true))) {
-          rows.push(['Rider', city.city, hub.hub, rider.riderId, rider.riderName,
+          rows.push(['Rider', city.city, hub.hub, String(rider.riderId), rider.riderName,
             rider.loginBehaviourTag, rider.regularityTag,
             rider.loginRatePct.toFixed(1) + '%', '1',
             String(rider.eveningLogins), '—', String(rider.morningLogins),
@@ -314,7 +314,7 @@ interface CityGroupProps {
   cityHubs: HubData[]
   cityExpanded: boolean
   expandedHubs: Set<string>
-  expandedRiders: Set<string>
+  expandedRiders: Set<number>
   hubMap: Map<string, RiderData[]>
   riders: RiderData[]
   ridersLoading: boolean
@@ -324,7 +324,7 @@ interface CityGroupProps {
   fmtHr: (h: number | null) => string
   onToggleCity: (city: string) => void
   onToggleHub: (hub: string) => void
-  onToggleRider: (riderId: string) => void
+  onToggleRider: (riderId: number) => void
   onExport: (city: string) => void
 }
 
@@ -380,11 +380,11 @@ interface HubGroupProps {
   hubRiders: RiderData[]
   hubExpanded: boolean
   ridersLoading: boolean
-  expandedRiders: Set<string>
+  expandedRiders: Set<number>
   fmt: (count: number, pct: number) => string
   fmtHr: (h: number | null) => string
   onToggleHub: (hub: string) => void
-  onToggleRider: (riderId: string) => void
+  onToggleRider: (riderId: number) => void
 }
 
 function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, fmt, fmtHr, onToggleHub, onToggleRider }: HubGroupProps) {
@@ -431,7 +431,7 @@ function fmtHrStatic(h: number | null): string {
   return `${display}:${mm.toString().padStart(2, '0')} ${suffix}`
 }
 
-function RiderRowGroup({ rider, expanded, onToggle }: { rider: RiderData; expanded: boolean; onToggle: (id: string) => void }) {
+function RiderRowGroup({ rider, expanded, onToggle }: { rider: RiderData; expanded: boolean; onToggle: (id: number) => void }) {
   return (
     <>
       <tr

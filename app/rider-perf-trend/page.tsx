@@ -29,7 +29,7 @@ interface CityRow {
 }
 interface HubRow extends CityRow { hub: string }
 interface RiderRow {
-  riderId: string; riderName: string; hub: string; city: string
+  riderId: number; riderName: string; hub: string; city: string
   loginBehaviourTag: LoginBehaviourTag; regularityTag: RegularityTag
   assigned3MR: number; attempted3MR: number; delivered3MR: number
   attemptProductivityPct: number; deliveredProductivityPct: number; earnings3MR: number
@@ -53,7 +53,7 @@ export default function RiderDetailsPage() {
   const [regularityFilter, setRegularityFilter] = useState('all')
   const [expandedCities, setExpandedCities] = useState<Set<string>>(new Set())
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set())
-  const [expandedRiders, setExpandedRiders] = useState<Set<string>>(new Set())
+  const [expandedRiders, setExpandedRiders] = useState<Set<number>>(new Set())
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function RiderDetailsPage() {
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })
-  const toggleRider = (riderId: string) => setExpandedRiders(prev => { const n = new Set(prev); n.has(riderId) ? n.delete(riderId) : n.add(riderId); return n })
+  const toggleRider = (riderId: number) => setExpandedRiders(prev => { const n = new Set(prev); n.has(riderId) ? n.delete(riderId) : n.add(riderId); return n })
 
   if (loading) return <div className="flex items-center gap-2 text-slate-500 py-16 justify-center"><Loader2 className="w-5 h-5 animate-spin" />Loading rider details...</div>
   if (!data) return <div className="text-red-600 py-8">Failed to load data</div>
@@ -91,7 +91,7 @@ export default function RiderDetailsPage() {
   const avgEarnings = totalRiders > 0 ? totalEarnings / totalRiders : 0
 
   const filteredRiders = riders.filter(r =>
-    !search || r.riderName.toLowerCase().includes(search.toLowerCase()) || r.riderId.includes(search),
+    !search || r.riderName.toLowerCase().includes(search.toLowerCase()) || String(r.riderId).includes(search),
   )
 
   const isFiltered = behaviourFilter !== 'all' || regularityFilter !== 'all'
@@ -302,7 +302,7 @@ function exportDailyPerfCsv(
         hub.avgAttemptProductivityPct.toFixed(1) + '%', hub.avgDeliveredProductivityPct.toFixed(1) + '%',
         hub.ridersLoggedIn > 0 ? (hub.totalEarnings3MR / hub.ridersLoggedIn).toFixed(0) : '0'])
       for (const rider of riders.filter(r => r.hub === hub.hub)) {
-        rows.push(['Rider', city.city, hub.hub, rider.riderId, rider.riderName,
+        rows.push(['Rider', city.city, hub.hub, String(rider.riderId), rider.riderName,
           rider.loginBehaviourTag, rider.regularityTag,
           '1', String(rider.assigned3MR), String(rider.attempted3MR), String(rider.delivered3MR),
           rider.attemptProductivityPct.toFixed(1) + '%', rider.deliveredProductivityPct.toFixed(1) + '%',
@@ -318,12 +318,12 @@ interface CitySectionProps {
   cityHubs: HubRow[]
   cityExpanded: boolean
   expandedHubs: Set<string>
-  expandedRiders: Set<string>
+  expandedRiders: Set<number>
   filteredRiders: RiderRow[]
   dateRange: { start: string; end: string } | null
   onToggleCity: (city: string) => void
   onToggleHub: (hub: string) => void
-  onToggleRider: (riderId: string) => void
+  onToggleRider: (riderId: number) => void
   allHubs: HubRow[]
   allRiders: RiderRow[]
 }
@@ -387,10 +387,10 @@ interface HubSectionProps {
   hub: HubRow
   hubRiders: RiderRow[]
   hubExpanded: boolean
-  expandedRiders: Set<string>
+  expandedRiders: Set<number>
   dateRange: { start: string; end: string } | null
   onToggleHub: (hub: string) => void
-  onToggleRider: (riderId: string) => void
+  onToggleRider: (riderId: number) => void
 }
 
 function HubSection({ hub, hubRiders, hubExpanded, expandedRiders, dateRange, onToggleHub, onToggleRider }: HubSectionProps) {
@@ -433,7 +433,7 @@ interface RiderSectionProps {
   rider: RiderRow
   expanded: boolean
   dateRange: { start: string; end: string } | null
-  onToggleRider: (riderId: string) => void
+  onToggleRider: (riderId: number) => void
 }
 
 function RiderSection({ rider, expanded, dateRange, onToggleRider }: RiderSectionProps) {
