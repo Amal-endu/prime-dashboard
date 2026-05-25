@@ -1,266 +1,104 @@
 export const runtime = 'nodejs'
 export const revalidate = 300
 import { NextResponse } from 'next/server'
-import { query } from '@/backend/db'
+import { query } from '@/lib/supabase/sql'
 import {
   apiError,
-  parseBehaviour,
   parseDatePreset,
-  parseHour,
-  parseRegularity,
   resolveDateRange,
 } from '@/lib/validators'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   try {
-    const behaviour = parseBehaviour(searchParams.get('behaviour'))
-    const regularity = parseRegularity(searchParams.get('regularity'))
-    const primeOnly = searchParams.get('prime') === 'true'
     const datePreset = parseDatePreset(searchParams.get('date'))
 
-    const [{ max_date }] = await query<{ max_date: string }>('SELECT max_date FROM v_max_date')
-    const maxDate = new Date(max_date)
-    const maxDateStr = maxDate.toISOString().slice(0, 10)
+    const [anchor] = await query<{ anchor_date: string }>(
+      'SELECT anchor_date::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
+    )
+    const maxDate = new Date(anchor.anchor_date)
+    const maxDateStr = anchor.anchor_date
     const { startDate, endDate } = resolveDateRange(datePreset, maxDate)
 
-    const mr3CutoffHour = parseHour(searchParams.get('mr3CutoffHour'), 15)
-
-    const behaviourClause = behaviour ? 'AND rs.login_behaviour_tag = ?' : ''
-    const regularityClause = regularity ? 'AND rs.regularity_tag = ?' : ''
-    const primeClause = primeOnly ? 'AND d.is_prime = TRUE' : ''
-    const filterParams = [
-      ...(behaviour ? [behaviour] : []),
-      ...(regularity ? [regularity] : []),
-    ]
-
-    const riderRows = await query<Record<string, unknown>>(
-      `WITH rs_map AS (
-        SELECT DISTINCT ON (rider_id)
-          rider_id, login_behaviour_tag, regularity_tag
-        FROM v_rider_summary
-      )
+    const cityRows = await query<Record<string, unknown>>(`
       SELECT
-        d.rider_id,
-        MAX(d.rider_name)                                                    AS rider_name,
-        d.hub,
-        COALESCE(MAX(d.city), 'Unmapped')                                    AS city,
-        MAX(rs.login_behaviour_tag)                                          AS behaviour_tag,
-        MAX(rs.regularity_tag)                                               AS regularity_tag,
-        SUM(d.assigned_3mr)                                                  AS orders_3mr,
-        SUM(d.delivered_3mr)                                                 AS delivered_3mr,
-        ROUND(SUM(d.delivered_3mr) * 100.0 / NULLIF(SUM(d.assigned_3mr),0), 1) AS del_pct,
-        SUM(d.breach_count)                                                  AS breach_count
-      FROM (
-        SELECT
-          TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          a.hub,
-          a.rider_id,
-          a.rider_name,
-          a.rider_tag,
-          a.client_name,
-          hm2.city,
-          hm2.zone,
-          CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
-          COUNT(*) AS assigned_3mr,
-          SUM(CASE WHEN a.latest_status IN ('DELIVERED','CID','NOT_CONTACTABLE') THEN 1 ELSE 0 END) AS attempted_3mr,
-          SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
-          SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
-        FROM sdd_awbs a
-        LEFT JOIN hub_mapping hm2 ON LOWER(a.hub) = LOWER(hm2.hub)
-        LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
-        WHERE HOUR(a.received_at_hub_time) >= ?
-          AND a.ofd_time IS NOT NULL
-          AND a.rider_id IS NOT NULL
-        GROUP BY TRY_CAST(ofd_time AS TIMESTAMP)::DATE, a.hub, a.rider_id, a.rider_name, a.rider_tag, a.client_name, hm2.city, hm2.zone, is_prime
-      ) d
-      LEFT JOIN rs_map rs ON d.rider_id = rs.rider_id
-      WHERE d.date BETWEEN ? AND ?
-        ${behaviourClause} ${regularityClause} ${primeClause}
-      GROUP BY d.rider_id, d.hub
-      ORDER BY del_pct ASC NULLS LAST
-      LIMIT 5000`,
-      [mr3CutoffHour, startDate, endDate, ...filterParams],
-    )
+        h.city,
+        SUM(h.assigned_3mr) AS orders_3mr,
+        SUM(h.delivered_3mr) AS delivered_3mr,
+        ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
+        SUM(h.breach_count_3mr) AS breach_count,
+        ROUND(SUM(h.breach_count_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
+      FROM hub_day_l8d h
+      WHERE h.date BETWEEN $1 AND $2
+      GROUP BY h.city
+      ORDER BY h.city
+    `, [startDate, endDate])
 
-    const hubRows = await query<Record<string, unknown>>(
-      `WITH rs_map AS (
-        SELECT DISTINCT ON (rider_id) rider_id, login_behaviour_tag, regularity_tag
-        FROM v_rider_summary
-      )
+    const hubRows = await query<Record<string, unknown>>(`
       SELECT
-        d.hub,
-        COALESCE(MAX(d.city), 'Unmapped')                                       AS city,
-        SUM(d.assigned_3mr)                                                     AS orders_3mr,
-        SUM(d.delivered_3mr)                                                    AS delivered_3mr,
-        ROUND(SUM(d.delivered_3mr) * 100.0 / NULLIF(SUM(d.assigned_3mr),0), 1) AS del_pct,
-        SUM(d.breach_count)                                                     AS breach_count,
-        ROUND(SUM(d.breach_count)  * 100.0 / NULLIF(SUM(d.assigned_3mr),0), 1) AS breach_pct
-      FROM (
-        SELECT
-          TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          a.hub,
-          a.rider_id,
-          a.rider_name,
-          a.rider_tag,
-          a.client_name,
-          hm2.city,
-          hm2.zone,
-          CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
-          COUNT(*) AS assigned_3mr,
-          SUM(CASE WHEN a.latest_status IN ('DELIVERED','CID','NOT_CONTACTABLE') THEN 1 ELSE 0 END) AS attempted_3mr,
-          SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
-          SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
-        FROM sdd_awbs a
-        LEFT JOIN hub_mapping hm2 ON LOWER(a.hub) = LOWER(hm2.hub)
-        LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
-        WHERE HOUR(a.received_at_hub_time) >= ?
-          AND a.ofd_time IS NOT NULL
-          AND a.rider_id IS NOT NULL
-        GROUP BY TRY_CAST(ofd_time AS TIMESTAMP)::DATE, a.hub, a.rider_id, a.rider_name, a.rider_tag, a.client_name, hm2.city, hm2.zone, is_prime
-      ) d
-      LEFT JOIN rs_map rs ON d.rider_id = rs.rider_id
-      WHERE d.date BETWEEN ? AND ?
-        ${behaviourClause} ${regularityClause} ${primeClause}
-      GROUP BY d.hub
-      ORDER BY city, del_pct ASC NULLS LAST`,
-      [mr3CutoffHour, startDate, endDate, ...filterParams],
-    )
+        h.hub, h.city,
+        SUM(h.assigned_3mr) AS orders_3mr,
+        SUM(h.delivered_3mr) AS delivered_3mr,
+        ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
+        SUM(h.breach_count_3mr) AS breach_count,
+        ROUND(SUM(h.breach_count_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
+      FROM hub_day_l8d h
+      WHERE h.date BETWEEN $1 AND $2
+      GROUP BY h.hub, h.city
+      ORDER BY h.city, h.hub
+    `, [startDate, endDate])
 
-    const cityRows = await query<Record<string, unknown>>(
-      `WITH rs_map AS (
-        SELECT DISTINCT ON (rider_id) rider_id, login_behaviour_tag, regularity_tag
-        FROM v_rider_summary
-      )
+    const riderRows = await query<Record<string, unknown>>(`
       SELECT
-        COALESCE(d.city, 'Unmapped')                                           AS city,
-        SUM(d.assigned_3mr)                                                     AS orders_3mr,
-        SUM(d.delivered_3mr)                                                    AS delivered_3mr,
-        ROUND(SUM(d.delivered_3mr) * 100.0 / NULLIF(SUM(d.assigned_3mr),0), 1) AS del_pct,
-        SUM(d.breach_count)                                                     AS breach_count,
-        ROUND(SUM(d.breach_count)  * 100.0 / NULLIF(SUM(d.assigned_3mr),0), 1) AS breach_pct
-      FROM (
-        SELECT
-          TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          a.hub,
-          a.rider_id,
-          a.rider_name,
-          a.rider_tag,
-          a.client_name,
-          hm2.city,
-          hm2.zone,
-          CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
-          COUNT(*) AS assigned_3mr,
-          SUM(CASE WHEN a.latest_status IN ('DELIVERED','CID','NOT_CONTACTABLE') THEN 1 ELSE 0 END) AS attempted_3mr,
-          SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
-          SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
-        FROM sdd_awbs a
-        LEFT JOIN hub_mapping hm2 ON LOWER(a.hub) = LOWER(hm2.hub)
-        LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
-        WHERE HOUR(a.received_at_hub_time) >= ?
-          AND a.ofd_time IS NOT NULL
-          AND a.rider_id IS NOT NULL
-        GROUP BY TRY_CAST(ofd_time AS TIMESTAMP)::DATE, a.hub, a.rider_id, a.rider_name, a.rider_tag, a.client_name, hm2.city, hm2.zone, is_prime
-      ) d
-      LEFT JOIN rs_map rs ON d.rider_id = rs.rider_id
-      WHERE d.date BETWEEN ? AND ?
-        ${behaviourClause} ${regularityClause} ${primeClause}
-      GROUP BY COALESCE(d.city, 'Unmapped')
-      ORDER BY del_pct ASC NULLS LAST`,
-      [mr3CutoffHour, startDate, endDate, ...filterParams],
-    )
+        s.rider_id,
+        MAX(rd.rider_name) AS rider_name,
+        s.hub,
+        COALESCE(hm.city, 'Unmapped') AS city,
+        SUM(s.assigned_3mr) AS orders_3mr,
+        SUM(s.delivered_3mr) AS delivered_3mr,
+        ROUND(SUM(s.delivered_3mr)::FLOAT / NULLIF(SUM(s.assigned_3mr), 0) * 100, 1) AS del_pct,
+        SUM(s.breach_count_3mr) AS breach_count
+      FROM rider_day_shipments s
+      LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
+      LEFT JOIN rider_daily rd ON rd.rider_id = s.rider_id AND rd.date = s.date
+      WHERE s.date BETWEEN $1 AND $2
+      GROUP BY s.rider_id, s.hub, hm.city
+      ORDER BY city, s.hub, s.rider_id
+      LIMIT 5000
+    `, [startDate, endDate])
 
-    // L7D trend: last 7 days DEL% vs previous 7 days DEL%, using the same filters as the table.
-    const trendRows7 = await query<Record<string, unknown>>(
-      `WITH rs_map AS (
-        SELECT DISTINCT ON (rider_id) rider_id, login_behaviour_tag, regularity_tag
-        FROM v_rider_summary
-      )
+    // L7D and L30D city-level delivery trends from hub_day_l8d
+    const trendRows7 = await query<Record<string, unknown>>(`
       SELECT
-        COALESCE(d.city, 'Unmapped') AS city,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 6 DAY) AND CAST(? AS DATE)
-            THEN d.delivered_3mr ELSE 0 END)::DOUBLE AS curr_del,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 6 DAY) AND CAST(? AS DATE)
-            THEN d.assigned_3mr ELSE 0 END)::DOUBLE AS curr_ord,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 13 DAY) AND (CAST(? AS DATE) - INTERVAL 7 DAY)
-            THEN d.delivered_3mr ELSE 0 END)::DOUBLE AS prev_del,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 13 DAY) AND (CAST(? AS DATE) - INTERVAL 7 DAY)
-            THEN d.assigned_3mr ELSE 0 END)::DOUBLE AS prev_ord
-      FROM (
-        SELECT
-          TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          a.hub,
-          a.rider_id,
-          a.rider_name,
-          a.rider_tag,
-          a.client_name,
-          hm2.city,
-          hm2.zone,
-          CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
-          COUNT(*) AS assigned_3mr,
-          SUM(CASE WHEN a.latest_status IN ('DELIVERED','CID','NOT_CONTACTABLE') THEN 1 ELSE 0 END) AS attempted_3mr,
-          SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
-          SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
-        FROM sdd_awbs a
-        LEFT JOIN hub_mapping hm2 ON LOWER(a.hub) = LOWER(hm2.hub)
-        LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
-        WHERE HOUR(a.received_at_hub_time) >= ?
-          AND a.ofd_time IS NOT NULL
-          AND a.rider_id IS NOT NULL
-        GROUP BY TRY_CAST(ofd_time AS TIMESTAMP)::DATE, a.hub, a.rider_id, a.rider_name, a.rider_tag, a.client_name, hm2.city, hm2.zone, is_prime
-      ) d
-      LEFT JOIN rs_map rs ON d.rider_id = rs.rider_id
-      WHERE 1=1
-        ${behaviourClause} ${regularityClause} ${primeClause}
-      GROUP BY COALESCE(d.city, 'Unmapped')`,
-      [maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, mr3CutoffHour, ...filterParams],
-    )
+        city,
+        SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '6 days') AND $1::DATE
+            THEN delivered_3mr ELSE 0 END)::FLOAT AS curr_del,
+        SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '6 days') AND $1::DATE
+            THEN assigned_3mr ELSE 0 END)::FLOAT AS curr_ord,
+        SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '13 days') AND ($1::DATE - INTERVAL '7 days')
+            THEN delivered_3mr ELSE 0 END)::FLOAT AS prev_del,
+        SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '13 days') AND ($1::DATE - INTERVAL '7 days')
+            THEN assigned_3mr ELSE 0 END)::FLOAT AS prev_ord
+      FROM hub_day_l8d
+      GROUP BY city
+    `, [maxDateStr])
 
-    // L30D trend: last 30 days DEL% vs previous 30 days DEL%, using the same filters as the table.
-    const trendRows30 = await query<Record<string, unknown>>(
-      `WITH rs_map AS (
-        SELECT DISTINCT ON (rider_id) rider_id, login_behaviour_tag, regularity_tag
-        FROM v_rider_summary
-      )
+    const trendRows30 = await query<Record<string, unknown>>(`
       SELECT
-        COALESCE(d.city, 'Unmapped') AS city,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 29 DAY) AND CAST(? AS DATE)
-            THEN d.delivered_3mr ELSE 0 END)::DOUBLE AS curr_del,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 29 DAY) AND CAST(? AS DATE)
-            THEN d.assigned_3mr ELSE 0 END)::DOUBLE AS curr_ord,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 59 DAY) AND (CAST(? AS DATE) - INTERVAL 30 DAY)
-            THEN d.delivered_3mr ELSE 0 END)::DOUBLE AS prev_del,
-        SUM(CASE WHEN d.date BETWEEN (CAST(? AS DATE) - INTERVAL 59 DAY) AND (CAST(? AS DATE) - INTERVAL 30 DAY)
-            THEN d.assigned_3mr ELSE 0 END)::DOUBLE AS prev_ord
-      FROM (
-        SELECT
-          TRY_CAST(ofd_time AS TIMESTAMP)::DATE AS date,
-          a.hub,
-          a.rider_id,
-          a.rider_name,
-          a.rider_tag,
-          a.client_name,
-          hm2.city,
-          hm2.zone,
-          CASE WHEN pc.client_name IS NOT NULL THEN TRUE ELSE FALSE END AS is_prime,
-          COUNT(*) AS assigned_3mr,
-          SUM(CASE WHEN a.latest_status IN ('DELIVERED','CID','NOT_CONTACTABLE') THEN 1 ELSE 0 END) AS attempted_3mr,
-          SUM(CASE WHEN a.latest_status = 'DELIVERED' THEN 1 ELSE 0 END) AS delivered_3mr,
-          SUM(CASE WHEN a.breach THEN 1 ELSE 0 END) AS breach_count
-        FROM sdd_awbs a
-        LEFT JOIN hub_mapping hm2 ON LOWER(a.hub) = LOWER(hm2.hub)
-        LEFT JOIN prime_clients pc ON LOWER(TRIM(a.client_name)) = LOWER(TRIM(pc.client_name))
-        WHERE HOUR(a.received_at_hub_time) >= ?
-          AND a.ofd_time IS NOT NULL
-          AND a.rider_id IS NOT NULL
-        GROUP BY TRY_CAST(ofd_time AS TIMESTAMP)::DATE, a.hub, a.rider_id, a.rider_name, a.rider_tag, a.client_name, hm2.city, hm2.zone, is_prime
-      ) d
-      LEFT JOIN rs_map rs ON d.rider_id = rs.rider_id
-      WHERE 1=1
-        ${behaviourClause} ${regularityClause} ${primeClause}
-      GROUP BY COALESCE(d.city, 'Unmapped')`,
-      [maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, maxDateStr, mr3CutoffHour, ...filterParams],
-    )
+        h.city,
+        SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '29 days') AND $1::DATE
+            THEN h.delivered_3mr ELSE 0 END)::FLOAT AS curr_del,
+        SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '29 days') AND $1::DATE
+            THEN h.assigned_3mr ELSE 0 END)::FLOAT AS curr_ord,
+        SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '59 days') AND ($1::DATE - INTERVAL '30 days')
+            THEN h.delivered_3mr ELSE 0 END)::FLOAT AS prev_del,
+        SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '59 days') AND ($1::DATE - INTERVAL '30 days')
+            THEN h.assigned_3mr ELSE 0 END)::FLOAT AS prev_ord
+      FROM rider_day_shipments s
+      LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
+      RIGHT JOIN hub_day_l8d h ON h.hub = s.hub AND h.date = s.date
+      GROUP BY h.city
+    `, [maxDateStr])
 
     const toNum = (v: unknown) => v == null ? 0 : Number(v)
 
@@ -271,7 +109,7 @@ export async function GET(request: Request) {
         const city = r.city as string
         const currDelPct = toNum(r.curr_ord) > 0 ? toNum(r.curr_del) / toNum(r.curr_ord) * 100 : 0
         const prevDelPct = toNum(r.prev_ord) > 0 ? toNum(r.prev_del) / toNum(r.prev_ord) * 100 : 0
-        map[city] = { delPct: currDelPct, prevDelPct, delta: currDelPct - prevDelPct }
+        map[city] = { delPct: Math.round(currDelPct * 10) / 10, prevDelPct: Math.round(prevDelPct * 10) / 10, delta: Math.round((currDelPct - prevDelPct) * 10) / 10 }
       }
       return map
     }
@@ -304,8 +142,8 @@ export async function GET(request: Request) {
         riderName: r.rider_name ?? '',
         hub: r.hub ?? '',
         city: r.city ?? '',
-        behaviourTag: r.behaviour_tag ?? 'Morning Rider',
-        regularityTag: r.regularity_tag ?? 'Regular',
+        behaviourTag: 'Morning Rider',
+        regularityTag: 'Regular',
         orders3MR: toNum(r.orders_3mr),
         delivered3MR: toNum(r.delivered_3mr),
         delPct: toNum(r.del_pct),

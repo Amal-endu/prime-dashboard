@@ -1,7 +1,7 @@
 export const runtime = 'nodejs'
 export const revalidate = 300
 import { NextResponse } from 'next/server'
-import { query } from '@/backend/db'
+import { query } from '@/lib/supabase/sql'
 import {
   apiError,
   parseBehaviour,
@@ -16,13 +16,6 @@ export async function GET(request: Request) {
     const behaviour = parseBehaviour(searchParams.get('behaviour'))
     const regularity = parseRegularity(searchParams.get('regularity'))
 
-    const behaviourClause = behaviour ? 'AND login_behaviour_tag = ?' : ''
-    const regularityClause = regularity ? 'AND regularity_tag = ?' : ''
-    const filterParams = [
-      ...(behaviour ? [behaviour] : []),
-      ...(regularity ? [regularity] : []),
-    ]
-
     const includeRiders = searchParams.get('riders') === '1'
 
     const windowDays       = parseWindowDays(searchParams.get('windowDays'),       30)
@@ -30,17 +23,28 @@ export async function GET(request: Request) {
     const eveningThreshold = parseThreshold(searchParams.get('eveningThreshold'),   80)
     const crossThreshold   = parseThreshold(searchParams.get('crossThreshold'),     70)
     const regularThreshold = parseThreshold(searchParams.get('regularThreshold'),   80)
-    const cfgParams = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
+    const cfgParams: unknown[] = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
+
+    const behaviourParam = behaviour ? behaviour : null
+    const regularityParam = regularity ? regularity : null
+
+    // $6 = behaviour filter (null = no filter), $7 = regularity filter (null = no filter)
+    const filterClause = `
+      AND ($6::TEXT IS NULL OR login_behaviour_tag = $6)
+      AND ($7::TEXT IS NULL OR regularity_tag = $7)
+    `
+    const filterParams: unknown[] = [behaviourParam, regularityParam]
 
     const classifyCte = `
 cfg AS (
   SELECT
-    ?::INTEGER AS window_days,
-    ?::INTEGER AS new_rider_days,
-    ?::DOUBLE  AS evening_threshold,
-    ?::DOUBLE  AS cross_threshold,
-    ?::DOUBLE  AS regular_threshold
+    $1::INTEGER AS window_days,
+    $2::INTEGER AS new_rider_days,
+    $3::FLOAT   AS evening_threshold,
+    $4::FLOAT   AS cross_threshold,
+    $5::FLOAT   AS regular_threshold
 ),
+anchor AS (SELECT anchor_date FROM data_anchor WHERE id = 1),
 rider_window AS (
   SELECT
     rd.rider_id,
@@ -50,10 +54,9 @@ rider_window AS (
     CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_morning_login,
     CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_evening_login,
     1 AS had_any_login
-  FROM rider_daily rd
-  CROSS JOIN (SELECT max_date FROM v_max_date) mx
-  CROSS JOIN cfg
-  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (cfg.window_days - 1) DAY) AND mx.max_date
+  FROM rider_daily rd, anchor, cfg
+  WHERE rd.date BETWEEN (anchor.anchor_date - (cfg.window_days - 1) * INTERVAL '1 day')::DATE
+                    AND anchor.anchor_date
 ),
 agg AS (
   SELECT
@@ -65,8 +68,7 @@ agg AS (
     SUM(had_morning_login) AS morning_login_days,
     SUM(had_evening_login) AS evening_login_days,
     ROUND(SUM(had_any_login) * 100.0 / (SELECT window_days FROM cfg), 1) AS login_rate_pct,
-    ROUND(SUM(had_evening_login) * 100.0 / NULLIF(SUM(had_any_login), 0), 1) AS evening_login_rate_pct,
-    MIN(date) AS first_login_in_window
+    ROUND(SUM(had_evening_login) * 100.0 / NULLIF(SUM(had_any_login), 0), 1) AS evening_login_rate_pct
   FROM rider_window
   GROUP BY rider_id
 ),
@@ -79,12 +81,8 @@ classified AS (
   SELECT
     a.*,
     gf.first_ever_login,
-    (SELECT max_date FROM v_max_date) AS max_date,
-    DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) AS active_since_days,
-    CASE
-      WHEN DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) <= (SELECT new_rider_days FROM cfg)
-        THEN TRUE ELSE FALSE
-    END AS is_new_rider,
+    (SELECT anchor_date FROM anchor) AS max_date,
+    ((SELECT anchor_date FROM anchor) - gf.first_ever_login) AS active_since_days,
     CASE
       WHEN morning_login_days = 0 AND evening_login_rate_pct >= (SELECT evening_threshold FROM cfg)
         THEN 'Evening Rider'
@@ -93,7 +91,7 @@ classified AS (
       ELSE 'Morning Rider'
     END AS login_behaviour_tag,
     CASE
-      WHEN DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) <= (SELECT new_rider_days FROM cfg)
+      WHEN ((SELECT anchor_date FROM anchor) - gf.first_ever_login) <= (SELECT new_rider_days FROM cfg)
         THEN 'New Rider'
       WHEN login_rate_pct >= (SELECT regular_threshold FROM cfg)
         THEN 'Regular'
@@ -108,106 +106,153 @@ rider_summary AS (
   LEFT JOIN hub_mapping hm ON LOWER(c.hub) = LOWER(hm.hub)
 )`
 
-    // avg_daily_src: per-day login counts from rider_daily (basis for avg daily rider numbers)
-    // Classification tags from rider_summary (window-level) are joined for Regular/Irregular/New %
     const avgDailyCte = `
-avg_daily_by_city AS (
+raw_metrics AS (
   SELECT
-    COALESCE(hm.city, 'Unmapped') AS city,
-    rd.date,
-    COUNT(DISTINCT rd.rider_id)::DOUBLE AS riders_that_day,
-    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS morning_that_day,
-    COUNT(DISTINCT CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS evening_that_day,
-    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL AND rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS cross_that_day
-  FROM rider_daily rd
-  CROSS JOIN (SELECT max_date FROM v_max_date) mx
-  LEFT JOIN hub_mapping hm ON LOWER(rd.hub) = LOWER(hm.hub)
-  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (?::INTEGER - 1) DAY) AND mx.max_date
-  GROUP BY hm.city, rd.date
-),
-avg_daily_by_hub AS (
-  SELECT
+    rd.rider_id,
     rd.hub,
     COALESCE(hm.city, 'Unmapped') AS city,
     rd.date,
-    COUNT(DISTINCT rd.rider_id)::DOUBLE AS riders_that_day,
-    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS morning_that_day,
-    COUNT(DISTINCT CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS evening_that_day,
-    COUNT(DISTINCT CASE WHEN rd.morning_runsheet_hour IS NOT NULL AND rd.evening_runsheet_hour IS NOT NULL THEN rd.rider_id END)::DOUBLE AS cross_that_day
-  FROM rider_daily rd
-  CROSS JOIN (SELECT max_date FROM v_max_date) mx
+    rd.morning_runsheet_hour,
+    rd.evening_runsheet_hour,
+    rd.attempt_morning,
+    rd.attempt_evening
+  FROM rider_daily rd, anchor
   LEFT JOIN hub_mapping hm ON LOWER(rd.hub) = LOWER(hm.hub)
-  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (?::INTEGER - 1) DAY) AND mx.max_date
-  GROUP BY rd.hub, hm.city, rd.date
+  WHERE rd.date BETWEEN (anchor.anchor_date - ((SELECT window_days FROM cfg) - 1) * INTERVAL '1 day')::DATE
+                    AND anchor.anchor_date
+),
+city_metrics AS (
+  SELECT
+    city,
+    ROUND(AVG(daily_riders), 1)     AS avg_daily_riders,
+    ROUND(AVG(morning_that_day), 1) AS avg_morning,
+    ROUND(AVG(evening_that_day), 1) AS avg_evening,
+    ROUND(AVG(cross_that_day), 1)   AS avg_cross,
+    ROUND(SUM(sum_morning_hr)::FLOAT  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
+    ROUND(SUM(sum_morning_atp)::FLOAT / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
+    ROUND(SUM(sum_evening_hr)::FLOAT  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
+    ROUND(SUM(sum_evening_atp)::FLOAT / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
+  FROM (
+    SELECT city, date,
+      COUNT(DISTINCT rider_id)::FLOAT AS daily_riders,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS morning_that_day,
+      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS evening_that_day,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS cross_that_day,
+      SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN morning_runsheet_hour ELSE 0 END) AS sum_morning_hr,
+      SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS morning_login_days,
+      SUM(attempt_morning)                                                                  AS sum_morning_atp,
+      SUM(CASE WHEN evening_runsheet_hour IS NOT NULL THEN evening_runsheet_hour ELSE 0 END) AS sum_evening_hr,
+      SUM(CASE WHEN evening_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS evening_login_days,
+      SUM(attempt_evening)                                                                  AS sum_evening_atp
+    FROM raw_metrics GROUP BY city, date
+  ) sub GROUP BY city
+),
+hub_metrics AS (
+  SELECT
+    hub, city,
+    ROUND(AVG(daily_riders), 1)     AS avg_daily_riders,
+    ROUND(AVG(morning_that_day), 1) AS avg_morning,
+    ROUND(AVG(evening_that_day), 1) AS avg_evening,
+    ROUND(AVG(cross_that_day), 1)   AS avg_cross,
+    ROUND(SUM(sum_morning_hr)::FLOAT  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
+    ROUND(SUM(sum_morning_atp)::FLOAT / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
+    ROUND(SUM(sum_evening_hr)::FLOAT  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
+    ROUND(SUM(sum_evening_atp)::FLOAT / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
+  FROM (
+    SELECT hub, city, date,
+      COUNT(DISTINCT rider_id)::FLOAT AS daily_riders,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS morning_that_day,
+      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS evening_that_day,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS cross_that_day,
+      SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN morning_runsheet_hour ELSE 0 END) AS sum_morning_hr,
+      SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS morning_login_days,
+      SUM(attempt_morning)                                                                  AS sum_morning_atp,
+      SUM(CASE WHEN evening_runsheet_hour IS NOT NULL THEN evening_runsheet_hour ELSE 0 END) AS sum_evening_hr,
+      SUM(CASE WHEN evening_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS evening_login_days,
+      SUM(attempt_evening)                                                                  AS sum_evening_atp
+    FROM raw_metrics GROUP BY hub, city, date
+  ) sub GROUP BY hub, city
 )`
 
     const cityRows = await query<Record<string, unknown>>(
       `WITH ${classifyCte},
       ${avgDailyCte}
       SELECT
-        adc.city,
-        ROUND(AVG(adc.riders_that_day), 1)  AS avg_daily_riders,
-        ROUND(AVG(adc.morning_that_day), 1) AS avg_morning,
-        ROUND(AVG(adc.evening_that_day), 1) AS avg_evening,
-        ROUND(AVG(adc.cross_that_day), 1)   AS avg_cross,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Regular')   AS regular_count,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Irregular') AS irregular_count,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'New Rider') AS new_rider_count,
+        cm.city,
+        cm.avg_daily_riders, cm.avg_morning, cm.avg_evening, cm.avg_cross,
+        cm.avg_morning_login_hr, cm.avg_morning_atp,
+        cm.avg_evening_login_hr, cm.avg_evening_atp,
         COUNT(DISTINCT rs.rider_id) AS total_unique_riders
-      FROM avg_daily_by_city adc
-      LEFT JOIN rider_summary rs ON COALESCE(rs.city, 'Unmapped') = adc.city
-        ${behaviourClause.replace('AND login_behaviour_tag', 'AND rs.login_behaviour_tag')}
-        ${regularityClause.replace('AND regularity_tag', 'AND rs.regularity_tag')}
-      GROUP BY adc.city
-      ORDER BY avg_daily_riders DESC`,
-      [...cfgParams, windowDays, windowDays, ...filterParams],
+      FROM city_metrics cm
+      LEFT JOIN rider_summary rs ON COALESCE(rs.city, 'Unmapped') = cm.city
+        ${filterClause.replace(/login_behaviour_tag/g, 'rs.login_behaviour_tag').replace(/regularity_tag/g, 'rs.regularity_tag')}
+      GROUP BY cm.city, cm.avg_daily_riders, cm.avg_morning, cm.avg_evening, cm.avg_cross,
+               cm.avg_morning_login_hr, cm.avg_morning_atp, cm.avg_evening_login_hr, cm.avg_evening_atp
+      ORDER BY cm.avg_daily_riders DESC`,
+      [...cfgParams, ...filterParams],
     )
 
     const hubRows = await query<Record<string, unknown>>(
       `WITH ${classifyCte},
       ${avgDailyCte}
       SELECT
-        adh.hub,
-        adh.city,
-        ROUND(AVG(adh.riders_that_day), 1)  AS avg_daily_riders,
-        ROUND(AVG(adh.morning_that_day), 1) AS avg_morning,
-        ROUND(AVG(adh.evening_that_day), 1) AS avg_evening,
-        ROUND(AVG(adh.cross_that_day), 1)   AS avg_cross,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Regular')   AS regular_count,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'Irregular') AS irregular_count,
-        COUNT(DISTINCT rs.rider_id) FILTER (WHERE rs.regularity_tag = 'New Rider') AS new_rider_count,
+        hm2.hub, hm2.city,
+        hm2.avg_daily_riders, hm2.avg_morning, hm2.avg_evening, hm2.avg_cross,
+        hm2.avg_morning_login_hr, hm2.avg_morning_atp,
+        hm2.avg_evening_login_hr, hm2.avg_evening_atp,
         COUNT(DISTINCT rs.rider_id) AS total_unique_riders
-      FROM avg_daily_by_hub adh
-      LEFT JOIN rider_summary rs ON LOWER(rs.hub) = LOWER(adh.hub)
-        ${behaviourClause.replace('AND login_behaviour_tag', 'AND rs.login_behaviour_tag')}
-        ${regularityClause.replace('AND regularity_tag', 'AND rs.regularity_tag')}
-      GROUP BY adh.hub, adh.city
-      ORDER BY adh.city, avg_daily_riders DESC`,
-      [...cfgParams, windowDays, windowDays, ...filterParams],
+      FROM hub_metrics hm2
+      LEFT JOIN rider_summary rs ON LOWER(rs.hub) = LOWER(hm2.hub)
+        ${filterClause.replace(/login_behaviour_tag/g, 'rs.login_behaviour_tag').replace(/regularity_tag/g, 'rs.regularity_tag')}
+      GROUP BY hm2.hub, hm2.city, hm2.avg_daily_riders, hm2.avg_morning, hm2.avg_evening, hm2.avg_cross,
+               hm2.avg_morning_login_hr, hm2.avg_morning_atp, hm2.avg_evening_login_hr, hm2.avg_evening_atp
+      ORDER BY hm2.city, hm2.avg_daily_riders DESC`,
+      [...cfgParams, ...filterParams],
     )
 
     const riderRows = includeRiders ? await query<Record<string, unknown>>(
-      `WITH ${classifyCte}
+      `WITH ${classifyCte},
+      rider_atp AS (
+        SELECT
+          rd.rider_id,
+          ROUND(
+            SUM(rd.attempt_morning)::FLOAT / NULLIF(SUM(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 END), 0)
+          , 1) AS avg_morning_atp,
+          ROUND(
+            AVG(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.morning_runsheet_hour END)
+          , 2) AS avg_morning_login_hr,
+          ROUND(
+            SUM(rd.attempt_evening)::FLOAT / NULLIF(SUM(CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN 1 END), 0)
+          , 1) AS avg_evening_atp,
+          ROUND(
+            AVG(CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.evening_runsheet_hour END)
+          , 2) AS avg_evening_login_hr
+        FROM rider_daily rd, anchor
+        WHERE rd.date BETWEEN (anchor.anchor_date - ((SELECT window_days FROM cfg) - 1) * INTERVAL '1 day')::DATE
+                          AND anchor.anchor_date
+        GROUP BY rd.rider_id
+      )
       SELECT
-        rider_id,
-        rider_name,
-        hub,
-        COALESCE(city, 'Unmapped')       AS city,
-        COALESCE(zone, '—')              AS zone,
-        login_behaviour_tag,
-        regularity_tag,
-        ROUND(login_rate_pct, 1)         AS login_rate_pct,
-        morning_login_days               AS morning_logins,
-        evening_login_days               AS evening_logins,
-        first_ever_login::VARCHAR        AS first_login_date,
-        active_since_days
-      FROM rider_summary
-      WHERE 1=1 ${behaviourClause} ${regularityClause}
-      ORDER BY city NULLS LAST, hub, rider_id`,
+        rs.rider_id, rs.rider_name, rs.hub,
+        COALESCE(rs.city, 'Unmapped') AS city,
+        COALESCE(rs.zone, '—')        AS zone,
+        rs.login_behaviour_tag, rs.regularity_tag,
+        ROUND(rs.login_rate_pct, 1)   AS login_rate_pct,
+        rs.morning_login_days         AS morning_logins,
+        rs.evening_login_days         AS evening_logins,
+        rs.first_ever_login::TEXT     AS first_login_date,
+        rs.active_since_days,
+        ra.avg_morning_atp, ra.avg_morning_login_hr,
+        ra.avg_evening_atp, ra.avg_evening_login_hr
+      FROM rider_summary rs
+      LEFT JOIN rider_atp ra ON rs.rider_id = ra.rider_id
+      WHERE ($6::TEXT IS NULL OR rs.login_behaviour_tag = $6)
+        AND ($7::TEXT IS NULL OR rs.regularity_tag = $7)
+      ORDER BY city NULLS LAST, hub, rs.rider_id`,
       [...cfgParams, ...filterParams],
     ) : []
 
-    // Global KPI — always unfiltered (full picture across the dataset)
     const [kpi] = await query<Record<string, unknown>>(
       `WITH ${classifyCte}
       SELECT
@@ -268,14 +313,14 @@ avg_daily_by_hub AS (
         return {
           city: r.city, zone: '—',
           totalRiders: avg, eveningCount: eve, crossUtilCount: crs, morningCount: mor,
-          regularCount: Number(r.regular_count), irregularCount: Number(r.irregular_count), newRiderCount: Number(r.new_rider_count),
           totalUniqueRiders: uniq,
           eveningRiderPct: avg > 0 ? Math.round(eve / avg * 1000) / 10 : 0,
           crossUtilisedPct: avg > 0 ? Math.round(crs / avg * 1000) / 10 : 0,
           morningRiderPct:  avg > 0 ? Math.round(mor / avg * 1000) / 10 : 0,
-          regularPct:  uniq > 0 ? Math.round(Number(r.regular_count)  / uniq * 1000) / 10 : 0,
-          irregularPct: uniq > 0 ? Math.round(Number(r.irregular_count) / uniq * 1000) / 10 : 0,
-          newRiderPct: uniq > 0 ? Math.round(Number(r.new_rider_count)  / uniq * 1000) / 10 : 0,
+          avgMorningLoginHr: r.avg_morning_login_hr != null ? Number(r.avg_morning_login_hr) : null,
+          avgMorningAtp:     r.avg_morning_atp     != null ? Number(r.avg_morning_atp)     : null,
+          avgEveningLoginHr: r.avg_evening_login_hr != null ? Number(r.avg_evening_login_hr) : null,
+          avgEveningAtp:     r.avg_evening_atp     != null ? Number(r.avg_evening_atp)     : null,
         }
       }),
       hubs: hubRows.map(r => {
@@ -287,14 +332,14 @@ avg_daily_by_hub AS (
         return {
           hub: r.hub, city: r.city,
           totalRiders: avg, eveningCount: eve, crossUtilCount: crs, morningCount: mor,
-          regularCount: Number(r.regular_count), irregularCount: Number(r.irregular_count), newRiderCount: Number(r.new_rider_count),
           totalUniqueRiders: uniq,
           eveningRiderPct: avg > 0 ? Math.round(eve / avg * 1000) / 10 : 0,
           crossUtilisedPct: avg > 0 ? Math.round(crs / avg * 1000) / 10 : 0,
           morningRiderPct:  avg > 0 ? Math.round(mor / avg * 1000) / 10 : 0,
-          regularPct:  uniq > 0 ? Math.round(Number(r.regular_count)  / uniq * 1000) / 10 : 0,
-          irregularPct: uniq > 0 ? Math.round(Number(r.irregular_count) / uniq * 1000) / 10 : 0,
-          newRiderPct: uniq > 0 ? Math.round(Number(r.new_rider_count)  / uniq * 1000) / 10 : 0,
+          avgMorningLoginHr: r.avg_morning_login_hr != null ? Number(r.avg_morning_login_hr) : null,
+          avgMorningAtp:     r.avg_morning_atp     != null ? Number(r.avg_morning_atp)     : null,
+          avgEveningLoginHr: r.avg_evening_login_hr != null ? Number(r.avg_evening_login_hr) : null,
+          avgEveningAtp:     r.avg_evening_atp     != null ? Number(r.avg_evening_atp)     : null,
         }
       }),
       riders: riderRows.map(r => ({
@@ -309,6 +354,10 @@ avg_daily_by_hub AS (
         eveningLogins: Number(r.evening_logins),
         firstLoginDate: (r.first_login_date as string | null)?.slice(0, 10) ?? '',
         activeSinceDays: Number(r.active_since_days),
+        avgMorningLoginHr: r.avg_morning_login_hr != null ? Number(r.avg_morning_login_hr) : null,
+        avgMorningAtp:     r.avg_morning_atp     != null ? Number(r.avg_morning_atp)     : null,
+        avgEveningLoginHr: r.avg_evening_login_hr != null ? Number(r.avg_evening_login_hr) : null,
+        avgEveningAtp:     r.avg_evening_atp     != null ? Number(r.avg_evening_atp)     : null,
       })),
     })
   } catch (err) {

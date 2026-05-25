@@ -1,7 +1,7 @@
 export const runtime = 'nodejs'
 export const revalidate = 300
 import { NextResponse } from 'next/server'
-import { query } from '@/backend/db'
+import { query } from '@/lib/supabase/sql'
 import { apiError, parseParamString, parseThreshold, parseWindowDays } from '@/lib/validators'
 
 export async function GET(request: Request) {
@@ -15,27 +15,27 @@ export async function GET(request: Request) {
     const eveningThreshold = parseThreshold(searchParams.get('eveningThreshold'),   80)
     const crossThreshold   = parseThreshold(searchParams.get('crossThreshold'),     70)
     const regularThreshold = parseThreshold(searchParams.get('regularThreshold'),   80)
-    const cfgParams = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
+    const cfgParams: unknown[] = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
 
     const classifyCte = `
 cfg AS (
   SELECT
-    ?::INTEGER AS window_days,
-    ?::INTEGER AS new_rider_days,
-    ?::DOUBLE  AS evening_threshold,
-    ?::DOUBLE  AS cross_threshold,
-    ?::DOUBLE  AS regular_threshold
+    $1::INTEGER AS window_days,
+    $2::INTEGER AS new_rider_days,
+    $3::FLOAT   AS evening_threshold,
+    $4::FLOAT   AS cross_threshold,
+    $5::FLOAT   AS regular_threshold
 ),
+anchor AS (SELECT anchor_date FROM data_anchor WHERE id = 1),
 rider_window AS (
   SELECT
     rd.rider_id, rd.rider_name, rd.hub, rd.date,
     CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_morning_login,
     CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_evening_login,
     1 AS had_any_login
-  FROM rider_daily rd
-  CROSS JOIN (SELECT max_date FROM v_max_date) mx
-  CROSS JOIN cfg
-  WHERE rd.date BETWEEN (mx.max_date - INTERVAL (cfg.window_days - 1) DAY) AND mx.max_date
+  FROM rider_daily rd, anchor, cfg
+  WHERE rd.date BETWEEN (anchor.anchor_date - (cfg.window_days - 1) * INTERVAL '1 day')::DATE
+                    AND anchor.anchor_date
 ),
 agg AS (
   SELECT
@@ -45,8 +45,7 @@ agg AS (
     SUM(had_morning_login) AS morning_login_days,
     SUM(had_evening_login) AS evening_login_days,
     ROUND(SUM(had_any_login) * 100.0 / (SELECT window_days FROM cfg), 1) AS login_rate_pct,
-    ROUND(SUM(had_evening_login) * 100.0 / NULLIF(SUM(had_any_login), 0), 1) AS evening_login_rate_pct,
-    MIN(date) AS first_login_in_window
+    ROUND(SUM(had_evening_login) * 100.0 / NULLIF(SUM(had_any_login), 0), 1) AS evening_login_rate_pct
   FROM rider_window GROUP BY rider_id
 ),
 global_first AS (
@@ -54,16 +53,15 @@ global_first AS (
 ),
 classified AS (
   SELECT a.*, gf.first_ever_login,
-    (SELECT max_date FROM v_max_date) AS max_date,
-    DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) AS active_since_days,
-    CASE WHEN DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) <= (SELECT new_rider_days FROM cfg) THEN TRUE ELSE FALSE END AS is_new_rider,
+    (SELECT anchor_date FROM anchor) AS max_date,
+    ((SELECT anchor_date FROM anchor) - gf.first_ever_login) AS active_since_days,
     CASE
       WHEN morning_login_days = 0 AND evening_login_rate_pct >= (SELECT evening_threshold FROM cfg) THEN 'Evening Rider'
       WHEN morning_login_days > 0 AND evening_login_rate_pct >= (SELECT cross_threshold FROM cfg) THEN 'Cross Utilised'
       ELSE 'Morning Rider'
     END AS login_behaviour_tag,
     CASE
-      WHEN DATEDIFF('day', gf.first_ever_login, (SELECT max_date FROM v_max_date)) <= (SELECT new_rider_days FROM cfg) THEN 'New Rider'
+      WHEN ((SELECT anchor_date FROM anchor) - gf.first_ever_login) <= (SELECT new_rider_days FROM cfg) THEN 'New Rider'
       WHEN login_rate_pct >= (SELECT regular_threshold FROM cfg) THEN 'Regular'
       ELSE 'Irregular'
     END AS regularity_tag
@@ -74,26 +72,22 @@ rider_summary AS (
   FROM classified c LEFT JOIN hub_mapping hm ON LOWER(c.hub) = LOWER(hm.hub)
 )`
 
-    const cityList = await query<{ city: string }>(`
-      SELECT DISTINCT COALESCE(city, 'Unmapped') AS city
-      FROM v_rider_summary
-      ORDER BY city
-    `)
+    const cityList = await query<{ city: string }>(
+      'SELECT DISTINCT city FROM hub_mapping WHERE city IS NOT NULL ORDER BY city'
+    )
 
     const hubList = city
       ? await query<{ hub: string }>(
-          `SELECT DISTINCT hub
-             FROM v_rider_summary
-            WHERE COALESCE(city, 'Unmapped') = ?
-            ORDER BY hub`,
+          'SELECT DISTINCT hub FROM hub_mapping WHERE city = $1 ORDER BY hub',
           [city],
         )
-      : await query<{ hub: string }>('SELECT DISTINCT hub FROM v_rider_summary ORDER BY hub')
+      : await query<{ hub: string }>('SELECT DISTINCT hub FROM hub_mapping ORDER BY hub')
 
-    const filterParams: string[] = []
+    const filterParams: unknown[] = []
     let where = 'WHERE 1=1'
-    if (city) { where += " AND COALESCE(city, 'Unmapped') = ?"; filterParams.push(city) }
-    if (hub)  { where += ' AND hub = ?';                         filterParams.push(hub) }
+    let paramIdx = 6
+    if (city) { where += ` AND COALESCE(city, 'Unmapped') = $${paramIdx++}`; filterParams.push(city) }
+    if (hub)  { where += ` AND hub = $${paramIdx++}`;                        filterParams.push(hub) }
 
     const matrixRows = await query<{ regularity_tag: string; login_behaviour_tag: string; n: number }>(
       `WITH ${classifyCte}

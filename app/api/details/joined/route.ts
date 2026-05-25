@@ -1,10 +1,10 @@
 export const runtime = 'nodejs'
 export const revalidate = 300
 import { NextResponse } from 'next/server'
-import { query } from '@/backend/db'
+import { query } from '@/lib/supabase/sql'
 import { ValidationError, apiError, parseIsoDate } from '@/lib/validators'
 
-// Combined raw_data + SDD_Data for a single rider on a date range.
+// Combined rider_daily + rider_day_shipments for a single rider on a date range.
 // Used by the rider drill-down expand panel in Rider Details.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 
     const loginRows = await query<Record<string, unknown>>(
       `SELECT
-         date::VARCHAR                AS date,
+         date::TEXT                   AS date,
          hub,
          rider_name,
          morning_runsheet_hour,
@@ -31,29 +31,29 @@ export async function GET(request: Request) {
          COALESCE(attempt_evening, 0) AS attempt_evening,
          COALESCE(attempted_total, 0) AS attempted_total
        FROM rider_daily
-       WHERE rider_id = ?
-         AND date BETWEEN ? AND ?
+       WHERE rider_id = $1
+         AND date BETWEEN $2 AND $3
        ORDER BY date DESC`,
       [riderId, startDate, endDate],
     )
 
     const deliveryRows = await query<Record<string, unknown>>(
       `SELECT
-         d.date::VARCHAR              AS date,
-         d.hub,
-         d.assigned_3mr,
-         d.attempted_3mr,
-         d.delivered_3mr,
-         d.breach_count,
-         ROUND(d.attempted_3mr * 100.0 / NULLIF(d.assigned_3mr, 0), 1)  AS attempt_pct,
-         ROUND(d.delivered_3mr * 100.0 / NULLIF(d.assigned_3mr, 0), 1)  AS del_pct,
-         ROUND(d.delivered_3mr * COALESCE(c.total_pay, 0), 0)            AS earnings
-       FROM v_3mr_delivery d
-       LEFT JOIN hub_mapping hm ON d.hub = hm.hub
-       LEFT JOIN cpo c ON hm.city = c.city
-       WHERE d.rider_id = ?
-         AND d.date BETWEEN ? AND ?
-       ORDER BY d.date DESC`,
+         s.date::TEXT                                                              AS date,
+         s.hub,
+         s.assigned_3mr,
+         s.attempted_3mr,
+         s.delivered_3mr,
+         s.breach_count_3mr                                                        AS breach_count,
+         ROUND(s.attempted_3mr::FLOAT / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS attempt_pct,
+         ROUND(s.delivered_3mr::FLOAT / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS del_pct,
+         ROUND(s.delivered_3mr::FLOAT * COALESCE(c.total_pay, 0), 0)             AS earnings
+       FROM rider_day_shipments s
+       LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
+       LEFT JOIN cpo c ON LOWER(hm.city) = LOWER(c.city)
+       WHERE s.rider_id = $1
+         AND s.date BETWEEN $2 AND $3
+       ORDER BY s.date DESC`,
       [riderId, startDate, endDate],
     )
 
