@@ -83,13 +83,27 @@ async function ingestRiderDaily() {
   console.log('Ingesting rider_daily from raw_data.csv...')
   const rows = parse(fs.readFileSync(RAW_DATA_PATH), { columns: true, skip_empty_lines: true })
   const valid = rows.filter(r => r.date && r.rider_id)
+  const CHUNK = 500
   let inserted = 0
-  for (const r of valid) {
+  for (let i = 0; i < valid.length; i += CHUNK) {
+    const chunk = valid.slice(i, i + CHUNK)
+    const vals = chunk.map((_, j) => {
+      const b = j * 9
+      return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9})`
+    }).join(',')
+    const params = chunk.flatMap(r => [
+      r.date, r.rider_id, r.hub, r.rider_name || null,
+      r.morning_runsheet_hour !== '' ? parseInt(r.morning_runsheet_hour) : null,
+      r.evening_runsheet_hour !== '' ? parseInt(r.evening_runsheet_hour) : null,
+      parseInt(r.attempt_morning || '0'),
+      parseInt(r.attempt_evening || '0'),
+      parseInt(r.attempted_total || '0'),
+    ])
     await query(`
       INSERT INTO rider_daily
         (date, rider_id, hub, rider_name, morning_runsheet_hour, evening_runsheet_hour,
          attempt_morning, attempt_evening, attempted_total)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      VALUES ${vals}
       ON CONFLICT (date, rider_id) DO UPDATE SET
         hub = EXCLUDED.hub,
         rider_name = EXCLUDED.rider_name,
@@ -98,17 +112,9 @@ async function ingestRiderDaily() {
         attempt_morning = EXCLUDED.attempt_morning,
         attempt_evening = EXCLUDED.attempt_evening,
         attempted_total = EXCLUDED.attempted_total
-    `, [
-      r.date, r.rider_id, r.hub, r.rider_name || null,
-      r.morning_runsheet_hour ? parseInt(r.morning_runsheet_hour) : null,
-      r.evening_runsheet_hour ? parseInt(r.evening_runsheet_hour) : null,
-      parseInt(r.attempt_morning || '0'),
-      parseInt(r.attempt_evening || '0'),
-      parseInt(r.attempted_total || '0'),
-    ])
-    inserted++
-    if (inserted % 100 === 0 || inserted === valid.length)
-      progress('rider_daily', inserted, valid.length, `(${inserted}/${valid.length} rows)`)
+    `, params)
+    inserted += chunk.length
+    progress('rider_daily', inserted, valid.length, `(${inserted}/${valid.length} rows)`)
   }
   console.log(`  rider_daily: ${inserted} rows upserted`)
 }
