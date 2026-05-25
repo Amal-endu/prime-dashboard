@@ -92,7 +92,7 @@ async function ingestRiderDaily() {
       return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9})`
     }).join(',')
     const params = chunk.flatMap(r => [
-      r.date, r.rider_id, r.hub, r.rider_name || null,
+      r.date, parseInt(r.rider_id, 10), r.hub, r.rider_name || null,
       r.morning_runsheet_hour !== '' ? parseInt(r.morning_runsheet_hour) : null,
       r.evening_runsheet_hour !== '' ? parseInt(r.evening_runsheet_hour) : null,
       parseInt(r.attempt_morning || '0'),
@@ -144,7 +144,8 @@ async function ingestSddCsv(filePath) {
     const date = ofdTs.toISOString().slice(0, 10)
 
     const hub = (r.hub || '').trim()
-    const riderId = (r.rider_id || '').trim()
+    const riderId = parseInt((r.rider_id || '').trim(), 10)
+    if (isNaN(riderId)) continue
     const clientName = (r.client_name || '').trim()
 
     const receivedTs = r.received_at_hub_time ? new Date(r.received_at_hub_time) : null
