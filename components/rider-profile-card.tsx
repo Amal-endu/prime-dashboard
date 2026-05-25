@@ -20,7 +20,7 @@ interface RiderStats {
 
 interface RiderProfileCardProps {
   rider: {
-    riderId: string
+    riderId: number
     riderName: string
     hub: string
     city: string
@@ -53,7 +53,7 @@ export function RiderProfileCard({ rider }: RiderProfileCardProps) {
   const [stats, setStats] = useState<RiderStats | null>(null)
 
   useEffect(() => {
-    const params = new URLSearchParams({ riderId: rider.riderId })
+    const params = new URLSearchParams({ riderId: String(rider.riderId) })
     Object.entries(toApiParams(config)).forEach(([k, v]) => params.set(k, v))
     fetch(`/api/profiling/rider-stats?${params}`)
       .then(r => r.json())
@@ -77,7 +77,7 @@ export function RiderProfileCard({ rider }: RiderProfileCardProps) {
             <div>
               <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-2">Identity</p>
               <div className="space-y-1.5">
-                <Row label="Rider ID" value={rider.riderId} mono />
+                <Row label="Rider ID" value={String(rider.riderId)} mono />
                 <Row label="Hub" value={rider.hub} />
                 <Row label="City" value={rider.city} />
                 <Row label="First Login" value={rider.firstLoginDate || '—'} mono />

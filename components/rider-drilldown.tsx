@@ -22,7 +22,7 @@ type JoinedSummary = {
 }
 
 interface RiderDrilldownProps {
-  rider: { riderId: string; riderName: string; hub: string; city: string; loginBehaviourTag: string; regularityTag: string }
+  rider: { riderId: number; riderName: string; hub: string; city: string; loginBehaviourTag: string; regularityTag: string }
   dateRange: { start: string; end: string }
   onClose: () => void
   colSpan: number
@@ -37,7 +37,7 @@ export function RiderDrilldown({ rider, dateRange, onClose, colSpan }: RiderDril
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     const params = new URLSearchParams({
-      riderId: rider.riderId,
+      riderId: String(rider.riderId),
       start: dateRange.start,
       end: dateRange.end,
     })

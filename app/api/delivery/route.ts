@@ -138,7 +138,7 @@ export async function GET(request: Request) {
         breachPct: toNum(r.breach_pct),
       })),
       riders: riderRows.map(r => ({
-        riderId: String(r.rider_id),
+        riderId: Number(r.rider_id),
         riderName: r.rider_name ?? '',
         hub: r.hub ?? '',
         city: r.city ?? '',
