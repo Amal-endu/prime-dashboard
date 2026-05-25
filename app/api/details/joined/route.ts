@@ -45,9 +45,9 @@ export async function GET(request: Request) {
          s.attempted_3mr,
          s.delivered_3mr,
          s.breach_count_3mr                                                        AS breach_count,
-         ROUND(s.attempted_3mr::FLOAT / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS attempt_pct,
-         ROUND(s.delivered_3mr::FLOAT / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS del_pct,
-         ROUND(s.delivered_3mr::FLOAT * COALESCE(c.total_pay, 0), 0)             AS earnings
+         ROUND(s.attempted_3mr::NUMERIC / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS attempt_pct,
+         ROUND(s.delivered_3mr::NUMERIC / NULLIF(s.assigned_3mr, 0) * 100, 1)      AS del_pct,
+         ROUND(s.delivered_3mr::NUMERIC * COALESCE(c.total_pay, 0), 0)             AS earnings
        FROM rider_day_shipments s
        LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
        LEFT JOIN cpo c ON LOWER(hm.city) = LOWER(c.city)

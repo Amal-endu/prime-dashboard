@@ -33,9 +33,9 @@ function buildCityDayQuery(col: string, dates: string[]): string {
       h.city,
       h.date::TEXT AS date,
       SUM(h.riders_active) AS riders,
-      ROUND(SUM(h.attempted_${col})::FLOAT / NULLIF(SUM(h.riders_active), 0), 1) AS avg_productivity,
-      ROUND(SUM(h.delivered_${col})::FLOAT * COALESCE(MAX(c.total_pay), 0) / NULLIF(SUM(h.riders_active), 0), 0) AS avg_earnings,
-      ROUND(SUM(h.delivered_${col})::FLOAT / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS del_pct
+      ROUND(SUM(h.attempted_${col})::NUMERIC / NULLIF(SUM(h.riders_active), 0), 1) AS avg_productivity,
+      ROUND(SUM(h.delivered_${col})::NUMERIC * COALESCE(MAX(c.total_pay), 0) / NULLIF(SUM(h.riders_active), 0), 0) AS avg_earnings,
+      ROUND(SUM(h.delivered_${col})::NUMERIC / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS del_pct
     FROM hub_day_l8d h
     LEFT JOIN cpo c ON h.city = c.city
     WHERE h.date IN (${placeholders})
@@ -52,9 +52,9 @@ function buildHubDayQuery(col: string, dates: string[]): string {
       h.city,
       h.date::TEXT AS date,
       h.riders_active AS riders,
-      ROUND(h.attempted_${col}::FLOAT / NULLIF(h.riders_active, 0), 1) AS avg_productivity,
-      ROUND(h.delivered_${col}::FLOAT * COALESCE(c.total_pay, 0) / NULLIF(h.riders_active, 0), 0) AS avg_earnings,
-      ROUND(h.delivered_${col}::FLOAT / NULLIF(h.assigned_${col}, 0) * 100, 1) AS del_pct
+      ROUND(h.attempted_${col}::NUMERIC / NULLIF(h.riders_active, 0), 1) AS avg_productivity,
+      ROUND(h.delivered_${col}::NUMERIC * COALESCE(c.total_pay, 0) / NULLIF(h.riders_active, 0), 0) AS avg_earnings,
+      ROUND(h.delivered_${col}::NUMERIC / NULLIF(h.assigned_${col}, 0) * 100, 1) AS del_pct
     FROM hub_day_l8d h
     LEFT JOIN cpo c ON h.city = c.city
     WHERE h.date IN (${placeholders})

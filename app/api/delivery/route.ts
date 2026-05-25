@@ -25,9 +25,9 @@ export async function GET(request: Request) {
         h.city,
         SUM(h.assigned_3mr) AS orders_3mr,
         SUM(h.delivered_3mr) AS delivered_3mr,
-        ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
+        ROUND(SUM(h.delivered_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
         SUM(h.breach_count_3mr) AS breach_count,
-        ROUND(SUM(h.breach_count_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
+        ROUND(SUM(h.breach_count_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
       FROM hub_day_l8d h
       WHERE h.date BETWEEN $1 AND $2
       GROUP BY h.city
@@ -39,9 +39,9 @@ export async function GET(request: Request) {
         h.hub, h.city,
         SUM(h.assigned_3mr) AS orders_3mr,
         SUM(h.delivered_3mr) AS delivered_3mr,
-        ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
+        ROUND(SUM(h.delivered_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct,
         SUM(h.breach_count_3mr) AS breach_count,
-        ROUND(SUM(h.breach_count_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
+        ROUND(SUM(h.breach_count_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS breach_pct
       FROM hub_day_l8d h
       WHERE h.date BETWEEN $1 AND $2
       GROUP BY h.hub, h.city
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
         COALESCE(hm.city, 'Unmapped') AS city,
         SUM(s.assigned_3mr) AS orders_3mr,
         SUM(s.delivered_3mr) AS delivered_3mr,
-        ROUND(SUM(s.delivered_3mr)::FLOAT / NULLIF(SUM(s.assigned_3mr), 0) * 100, 1) AS del_pct,
+        ROUND(SUM(s.delivered_3mr)::NUMERIC / NULLIF(SUM(s.assigned_3mr), 0) * 100, 1) AS del_pct,
         SUM(s.breach_count_3mr) AS breach_count
       FROM rider_day_shipments s
       LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
@@ -72,13 +72,13 @@ export async function GET(request: Request) {
       SELECT
         city,
         SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '6 days') AND $1::DATE
-            THEN delivered_3mr ELSE 0 END)::FLOAT AS curr_del,
+            THEN delivered_3mr ELSE 0 END)::NUMERIC AS curr_del,
         SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '6 days') AND $1::DATE
-            THEN assigned_3mr ELSE 0 END)::FLOAT AS curr_ord,
+            THEN assigned_3mr ELSE 0 END)::NUMERIC AS curr_ord,
         SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '13 days') AND ($1::DATE - INTERVAL '7 days')
-            THEN delivered_3mr ELSE 0 END)::FLOAT AS prev_del,
+            THEN delivered_3mr ELSE 0 END)::NUMERIC AS prev_del,
         SUM(CASE WHEN date BETWEEN ($1::DATE - INTERVAL '13 days') AND ($1::DATE - INTERVAL '7 days')
-            THEN assigned_3mr ELSE 0 END)::FLOAT AS prev_ord
+            THEN assigned_3mr ELSE 0 END)::NUMERIC AS prev_ord
       FROM hub_day_l8d
       GROUP BY city
     `, [maxDateStr])
@@ -87,13 +87,13 @@ export async function GET(request: Request) {
       SELECT
         h.city,
         SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '29 days') AND $1::DATE
-            THEN h.delivered_3mr ELSE 0 END)::FLOAT AS curr_del,
+            THEN h.delivered_3mr ELSE 0 END)::NUMERIC AS curr_del,
         SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '29 days') AND $1::DATE
-            THEN h.assigned_3mr ELSE 0 END)::FLOAT AS curr_ord,
+            THEN h.assigned_3mr ELSE 0 END)::NUMERIC AS curr_ord,
         SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '59 days') AND ($1::DATE - INTERVAL '30 days')
-            THEN h.delivered_3mr ELSE 0 END)::FLOAT AS prev_del,
+            THEN h.delivered_3mr ELSE 0 END)::NUMERIC AS prev_del,
         SUM(CASE WHEN h.date BETWEEN ($1::DATE - INTERVAL '59 days') AND ($1::DATE - INTERVAL '30 days')
-            THEN h.assigned_3mr ELSE 0 END)::FLOAT AS prev_ord
+            THEN h.assigned_3mr ELSE 0 END)::NUMERIC AS prev_ord
       FROM rider_day_shipments s
       LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
       RIGHT JOIN hub_day_l8d h ON h.hub = s.hub AND h.date = s.date

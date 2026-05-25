@@ -40,9 +40,9 @@ cfg AS (
   SELECT
     $1::INTEGER AS window_days,
     $2::INTEGER AS new_rider_days,
-    $3::FLOAT   AS evening_threshold,
-    $4::FLOAT   AS cross_threshold,
-    $5::FLOAT   AS regular_threshold
+    $3::NUMERIC   AS evening_threshold,
+    $4::NUMERIC   AS cross_threshold,
+    $5::NUMERIC   AS regular_threshold
 ),
 anchor AS (SELECT anchor_date FROM data_anchor WHERE id = 1),
 rider_window AS (
@@ -129,16 +129,16 @@ city_metrics AS (
     ROUND(AVG(morning_that_day), 1) AS avg_morning,
     ROUND(AVG(evening_that_day), 1) AS avg_evening,
     ROUND(AVG(cross_that_day), 1)   AS avg_cross,
-    ROUND(SUM(sum_morning_hr)::FLOAT  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
-    ROUND(SUM(sum_morning_atp)::FLOAT / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
-    ROUND(SUM(sum_evening_hr)::FLOAT  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
-    ROUND(SUM(sum_evening_atp)::FLOAT / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
+    ROUND(SUM(sum_morning_hr)::NUMERIC  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
+    ROUND(SUM(sum_morning_atp)::NUMERIC / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
+    ROUND(SUM(sum_evening_hr)::NUMERIC  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
+    ROUND(SUM(sum_evening_atp)::NUMERIC / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
   FROM (
     SELECT city, date,
-      COUNT(DISTINCT rider_id)::FLOAT AS daily_riders,
-      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS morning_that_day,
-      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS evening_that_day,
-      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS cross_that_day,
+      COUNT(DISTINCT rider_id)::NUMERIC AS daily_riders,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS morning_that_day,
+      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS evening_that_day,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS cross_that_day,
       SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN morning_runsheet_hour ELSE 0 END) AS sum_morning_hr,
       SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS morning_login_days,
       SUM(attempt_morning)                                                                  AS sum_morning_atp,
@@ -155,16 +155,16 @@ hub_metrics AS (
     ROUND(AVG(morning_that_day), 1) AS avg_morning,
     ROUND(AVG(evening_that_day), 1) AS avg_evening,
     ROUND(AVG(cross_that_day), 1)   AS avg_cross,
-    ROUND(SUM(sum_morning_hr)::FLOAT  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
-    ROUND(SUM(sum_morning_atp)::FLOAT / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
-    ROUND(SUM(sum_evening_hr)::FLOAT  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
-    ROUND(SUM(sum_evening_atp)::FLOAT / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
+    ROUND(SUM(sum_morning_hr)::NUMERIC  / NULLIF(SUM(morning_login_days), 0), 2) AS avg_morning_login_hr,
+    ROUND(SUM(sum_morning_atp)::NUMERIC / NULLIF(SUM(morning_login_days), 0), 1) AS avg_morning_atp,
+    ROUND(SUM(sum_evening_hr)::NUMERIC  / NULLIF(SUM(evening_login_days), 0), 2) AS avg_evening_login_hr,
+    ROUND(SUM(sum_evening_atp)::NUMERIC / NULLIF(SUM(evening_login_days), 0), 1) AS avg_evening_atp
   FROM (
     SELECT hub, city, date,
-      COUNT(DISTINCT rider_id)::FLOAT AS daily_riders,
-      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS morning_that_day,
-      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS evening_that_day,
-      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::FLOAT AS cross_that_day,
+      COUNT(DISTINCT rider_id)::NUMERIC AS daily_riders,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS morning_that_day,
+      COUNT(DISTINCT CASE WHEN evening_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS evening_that_day,
+      COUNT(DISTINCT CASE WHEN morning_runsheet_hour IS NOT NULL AND evening_runsheet_hour IS NOT NULL THEN rider_id END)::NUMERIC AS cross_that_day,
       SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN morning_runsheet_hour ELSE 0 END) AS sum_morning_hr,
       SUM(CASE WHEN morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END)                    AS morning_login_days,
       SUM(attempt_morning)                                                                  AS sum_morning_atp,
@@ -217,13 +217,13 @@ hub_metrics AS (
         SELECT
           rd.rider_id,
           ROUND(
-            SUM(rd.attempt_morning)::FLOAT / NULLIF(SUM(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 END), 0)
+            SUM(rd.attempt_morning)::NUMERIC / NULLIF(SUM(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 END), 0)
           , 1) AS avg_morning_atp,
           ROUND(
             AVG(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.morning_runsheet_hour END)
           , 2) AS avg_morning_login_hr,
           ROUND(
-            SUM(rd.attempt_evening)::FLOAT / NULLIF(SUM(CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN 1 END), 0)
+            SUM(rd.attempt_evening)::NUMERIC / NULLIF(SUM(CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN 1 END), 0)
           , 1) AS avg_evening_atp,
           ROUND(
             AVG(CASE WHEN rd.evening_runsheet_hour IS NOT NULL THEN rd.evening_runsheet_hour END)

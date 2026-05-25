@@ -30,9 +30,9 @@ export async function GET(request: Request) {
         SUM(h.assigned_${col}) AS assigned_3mr,
         SUM(h.attempted_${col}) AS attempted_3mr,
         SUM(h.delivered_${col}) AS delivered_3mr,
-        ROUND(SUM(h.attempted_${col})::FLOAT / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
-        ROUND(SUM(h.delivered_${col})::FLOAT / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
-        ROUND(SUM(h.delivered_${col})::FLOAT * COALESCE(MAX(c.total_pay), 0), 0) AS total_earnings
+        ROUND(SUM(h.attempted_${col})::NUMERIC / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
+        ROUND(SUM(h.delivered_${col})::NUMERIC / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
+        ROUND(SUM(h.delivered_${col})::NUMERIC * COALESCE(MAX(c.total_pay), 0), 0) AS total_earnings
       FROM hub_day_l8d h
       LEFT JOIN cpo c ON h.city = c.city
       WHERE h.date BETWEEN $1 AND $2
@@ -48,9 +48,9 @@ export async function GET(request: Request) {
         SUM(h.assigned_${col}) AS assigned_3mr,
         SUM(h.attempted_${col}) AS attempted_3mr,
         SUM(h.delivered_${col}) AS delivered_3mr,
-        ROUND(SUM(h.attempted_${col})::FLOAT / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
-        ROUND(SUM(h.delivered_${col})::FLOAT / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
-        ROUND(SUM(h.delivered_${col})::FLOAT * COALESCE(MAX(c.total_pay), 0), 0) AS total_earnings
+        ROUND(SUM(h.attempted_${col})::NUMERIC / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
+        ROUND(SUM(h.delivered_${col})::NUMERIC / NULLIF(SUM(h.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
+        ROUND(SUM(h.delivered_${col})::NUMERIC * COALESCE(MAX(c.total_pay), 0), 0) AS total_earnings
       FROM hub_day_l8d h
       LEFT JOIN cpo c ON h.city = c.city
       WHERE h.date BETWEEN $1 AND $2
@@ -67,9 +67,9 @@ export async function GET(request: Request) {
         SUM(s.assigned_${col}) AS assigned_3mr,
         SUM(s.attempted_${col}) AS attempted_3mr,
         SUM(s.delivered_${col}) AS delivered_3mr,
-        ROUND(SUM(s.attempted_${col})::FLOAT / NULLIF(SUM(s.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
-        ROUND(SUM(s.delivered_${col})::FLOAT / NULLIF(SUM(s.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
-        ROUND(SUM(s.delivered_${col})::FLOAT * COALESCE(MAX(c.total_pay), 0), 0) AS earnings_3mr,
+        ROUND(SUM(s.attempted_${col})::NUMERIC / NULLIF(SUM(s.assigned_${col}), 0) * 100, 1) AS attempt_prod_pct,
+        ROUND(SUM(s.delivered_${col})::NUMERIC / NULLIF(SUM(s.assigned_${col}), 0) * 100, 1) AS delivered_prod_pct,
+        ROUND(SUM(s.delivered_${col})::NUMERIC * COALESCE(MAX(c.total_pay), 0), 0) AS earnings_3mr,
         ROUND(AVG(CASE WHEN rd.attempt_morning > 0 THEN rd.attempt_morning END), 1) AS avg_morning_productivity,
         ROUND(AVG(CASE WHEN rd.attempt_evening > 0 THEN rd.attempt_evening END), 1) AS avg_evening_productivity,
         ROUND(AVG(CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN rd.morning_runsheet_hour END), 1) AS avg_morning_runsheet_hr,

@@ -44,7 +44,7 @@ export async function GET(request: Request) {
           SUM(h.assigned_3mr)   AS demand_3mr,
           SUM(h.delivered_3mr)  AS delivered_3mr,
           SUM(h.assigned_overall) AS total_demand,
-          ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct
+          ROUND(SUM(h.delivered_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct
         FROM hub_day_l8d h
         WHERE h.date = $1
         GROUP BY h.city
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
           SUM(h.assigned_3mr)   AS demand_3mr,
           SUM(h.delivered_3mr)  AS delivered_3mr,
           SUM(h.assigned_overall) AS total_demand,
-          ROUND(SUM(h.delivered_3mr)::FLOAT / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct
+          ROUND(SUM(h.delivered_3mr)::NUMERIC / NULLIF(SUM(h.assigned_3mr), 0) * 100, 1) AS del_pct
         FROM hub_day_l8d h
         WHERE h.date = $1
         GROUP BY h.hub, h.city
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
         SUM(awbs_3mr)      AS awbs_3mr,
         SUM(delivered_3mr) AS delivered,
         SUM(awbs_overall)  AS total_awbs,
-        ROUND(SUM(delivered_3mr)::FLOAT / NULLIF(SUM(awbs_3mr), 0) * 100, 1) AS del_pct
+        ROUND(SUM(delivered_3mr)::NUMERIC / NULLIF(SUM(awbs_3mr), 0) * 100, 1) AS del_pct
       FROM client_day_shipments
       WHERE date = $1
         AND client_name IS NOT NULL
