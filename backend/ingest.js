@@ -276,9 +276,10 @@ async function refreshHubDayL8d() {
 async function updateDataAnchor() {
   const rdRows = await query('SELECT MAX(date)::TEXT AS rd_max FROM rider_daily')
   const shRows = await query('SELECT MAX(date)::TEXT AS sh_max FROM rider_day_shipments')
-  const rd_max = rdRows[0]?.rd_max
+  const rd_max = rdRows[0]?.rd_max || null
   const sh_max = shRows[0]?.sh_max
-  if (!rd_max || !sh_max) { console.log('No data yet, skipping anchor update'); return }
+  if (!sh_max) { console.log('No shipment data yet, skipping anchor update'); return }
+  // anchor_date is a generated column (auto-computed from shipments_max), do not insert it
   await query(`
     INSERT INTO data_anchor (id, rider_daily_max, shipments_max, updated_at)
     VALUES (1, $1, $2, NOW())

@@ -7,7 +7,7 @@ import { apiError } from '@/lib/validators'
 export async function GET() {
   try {
     const anchorRows = await query<{ anchor_date: string; updated_at: string }>(
-      'SELECT shipments_max::TEXT AS anchor_date, updated_at FROM data_anchor WHERE id = 1'
+      'SELECT anchor_date::TEXT AS anchor_date, updated_at FROM data_anchor WHERE id = 1'
     )
     const anchor = anchorRows[0]
     const riderRows = await query<{ total_riders: number }>(

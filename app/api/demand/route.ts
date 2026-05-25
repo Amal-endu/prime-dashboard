@@ -13,7 +13,7 @@ export async function GET(request: Request) {
 
   try {
     const [anchor] = await query<{ anchor_date: string }>(
-      'SELECT shipments_max::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
+      'SELECT anchor_date::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
     )
     const maxDate = new Date(anchor.anchor_date)
     const today = anchor.anchor_date
