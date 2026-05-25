@@ -11,7 +11,7 @@ export interface GlobalKPIs {
 }
 
 export interface RiderProfile {
-  riderId: string
+  riderId: number
   riderName: string
   hub: string
   city: string
@@ -51,7 +51,7 @@ export interface CityProfile {
 }
 
 export interface RiderDetail {
-  riderId: string
+  riderId: number
   riderName: string
   hub: string
   city: string
@@ -88,7 +88,7 @@ export interface CityDetail {
 }
 
 export interface RiderDelivery {
-  riderId: string
+  riderId: number
   riderName: string
   hub: string
   city: string
