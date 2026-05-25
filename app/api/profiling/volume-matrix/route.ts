@@ -26,7 +26,7 @@ cfg AS (
     $4::FLOAT   AS cross_threshold,
     $5::FLOAT   AS regular_threshold
 ),
-anchor AS (SELECT anchor_date FROM data_anchor WHERE id = 1),
+anchor AS (SELECT shipments_max AS anchor_date FROM data_anchor WHERE id = 1),
 rider_window AS (
   SELECT rd.rider_id, rd.rider_name, rd.hub, rd.date,
     CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_morning_login,

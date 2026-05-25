@@ -79,7 +79,7 @@ export async function GET(request: Request) {
     const col = mode === 'overall' ? 'overall' : '3mr'
 
     const [anchor] = await query<{ anchor_date: string }>(
-      'SELECT anchor_date::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
+      'SELECT shipments_max::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
     )
     const maxDate = new Date(anchor.anchor_date)
 

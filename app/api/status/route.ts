@@ -7,12 +7,13 @@ import { apiError } from '@/lib/validators'
 export async function GET() {
   try {
     const anchorRows = await query<{ anchor_date: string; updated_at: string }>(
-      'SELECT anchor_date::TEXT AS anchor_date, updated_at FROM data_anchor WHERE id = 1'
+      'SELECT shipments_max::TEXT AS anchor_date, updated_at FROM data_anchor WHERE id = 1'
     )
     const anchor = anchorRows[0]
-    const [{ total_riders }] = await query<{ total_riders: number }>(
+    const riderRows = await query<{ total_riders: number }>(
       'SELECT COUNT(DISTINCT rider_id) AS total_riders FROM rider_daily'
     )
+    const total_riders = riderRows[0]?.total_riders ?? 0
     const logs = await query<{ filename: string; ingested_at: string }>(
       'SELECT filename, ingested_at FROM ingest_log ORDER BY ingested_at DESC LIMIT 5'
     )
