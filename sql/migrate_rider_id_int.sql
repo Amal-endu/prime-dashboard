@@ -3,28 +3,31 @@
 --   psql "$DATABASE_URL" -f sql/migrate_rider_id_int.sql
 -- Safe to re-run: the DO block checks if columns are already INT before altering.
 
--- ── Step 0: Audit — fail fast if any non-numeric IDs exist ───────────────────
+-- ── Step 0: Audit — fail fast if IDs aren't castable to integer ──────────────
+-- IDs may be stored as "12345.0" (float string from CSV) — that's fine.
+-- We strip the decimal part with SPLIT_PART before casting.
+-- Only truly non-numeric values (letters, symbols) will fail.
 DO $$
 DECLARE
   bad_count INTEGER;
 BEGIN
   SELECT COUNT(*) INTO bad_count
   FROM rider_daily
-  WHERE rider_id !~ '^\d+$';
+  WHERE SPLIT_PART(rider_id, '.', 1) !~ '^\d+$';
 
   IF bad_count > 0 THEN
-    RAISE EXCEPTION 'rider_daily has % non-numeric rider_id values — migration aborted', bad_count;
+    RAISE EXCEPTION 'rider_daily has % non-castable rider_id values — migration aborted', bad_count;
   END IF;
 
   SELECT COUNT(*) INTO bad_count
   FROM rider_day_shipments
-  WHERE rider_id !~ '^\d+$';
+  WHERE SPLIT_PART(rider_id, '.', 1) !~ '^\d+$';
 
   IF bad_count > 0 THEN
-    RAISE EXCEPTION 'rider_day_shipments has % non-numeric rider_id values — migration aborted', bad_count;
+    RAISE EXCEPTION 'rider_day_shipments has % non-castable rider_id values — migration aborted', bad_count;
   END IF;
 
-  RAISE NOTICE 'Audit passed: all rider_id values are numeric.';
+  RAISE NOTICE 'Audit passed: all rider_id values are castable to INTEGER.';
 END $$;
 
 -- ── Step 1: Drop indexes and PKs on rider_daily ───────────────────────────────
@@ -39,7 +42,7 @@ BEGIN
   IF (SELECT data_type FROM information_schema.columns
       WHERE table_name = 'rider_daily' AND column_name = 'rider_id') <> 'integer' THEN
     ALTER TABLE rider_daily
-      ALTER COLUMN rider_id TYPE INTEGER USING rider_id::INTEGER;
+      ALTER COLUMN rider_id TYPE INTEGER USING SPLIT_PART(rider_id, '.', 1)::INTEGER;
     RAISE NOTICE 'rider_daily.rider_id converted to INTEGER.';
   ELSE
     RAISE NOTICE 'rider_daily.rider_id is already INTEGER, skipping.';
@@ -64,7 +67,7 @@ BEGIN
   IF (SELECT data_type FROM information_schema.columns
       WHERE table_name = 'rider_day_shipments' AND column_name = 'rider_id') <> 'integer' THEN
     ALTER TABLE rider_day_shipments
-      ALTER COLUMN rider_id TYPE INTEGER USING rider_id::INTEGER;
+      ALTER COLUMN rider_id TYPE INTEGER USING SPLIT_PART(rider_id, '.', 1)::INTEGER;
     RAISE NOTICE 'rider_day_shipments.rider_id converted to INTEGER.';
   ELSE
     RAISE NOTICE 'rider_day_shipments.rider_id is already INTEGER, skipping.';
@@ -78,6 +81,10 @@ CREATE INDEX IF NOT EXISTS rider_day_ship_rider_idx    ON rider_day_shipments (r
 CREATE INDEX IF NOT EXISTS rider_day_ship_date_idx     ON rider_day_shipments (date);
 
 -- ── Step 7: Recreate classify_riders() with INTEGER rider_id ─────────────────
+-- Drop dependent view first, then drop the function (return type change requires it).
+DROP VIEW IF EXISTS v_current_classification;
+DROP FUNCTION IF EXISTS classify_riders(INTEGER, INTEGER, NUMERIC, NUMERIC, NUMERIC);
+
 CREATE OR REPLACE FUNCTION classify_riders(
   p_window_days       INTEGER DEFAULT 30,
   p_new_rider_days    INTEGER DEFAULT 7,
