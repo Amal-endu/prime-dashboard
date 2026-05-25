@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Search, SlidersHorizontal, Loader2, Percent, Hash } from 'lucide-react'
+import { ChevronRight, ChevronDown, Search, SlidersHorizontal, Loader2, Percent, Hash, Download } from 'lucide-react'
 import { StatCard } from '@/components/stat-card'
 import { BehaviourBadge, RegularityBadge } from '@/components/profile-badges'
 import { MatrixTable } from '@/components/matrix-table'
@@ -18,9 +18,9 @@ const REGULARITY_OPTIONS: RegularityTag[] = ['Regular', 'Irregular', 'New Rider'
 interface CityData {
   city: string; zone: string; totalRiders: number
   eveningCount: number; crossUtilCount: number; morningCount: number
-  regularCount: number; irregularCount: number; newRiderCount: number
   eveningRiderPct: number; crossUtilisedPct: number; morningRiderPct: number
-  regularPct: number; irregularPct: number; newRiderPct: number
+  avgMorningLoginHr: number | null; avgMorningAtp: number | null
+  avgEveningLoginHr: number | null; avgEveningAtp: number | null
 }
 interface HubData extends CityData { hub: string }
 interface RiderData {
@@ -28,6 +28,8 @@ interface RiderData {
   loginBehaviourTag: LoginBehaviourTag; regularityTag: RegularityTag
   loginRatePct: number; morningLogins: number; eveningLogins: number
   firstLoginDate: string; activeSinceDays: number
+  avgMorningLoginHr: number | null; avgMorningAtp: number | null
+  avgEveningLoginHr: number | null; avgEveningAtp: number | null
 }
 interface MatrixCell { evening: number; cross: number; morning: number; total: number }
 interface ApiData {
@@ -38,7 +40,7 @@ interface ApiData {
   riders: RiderData[]
 }
 
-type SortCol = 'city' | 'totalRiders' | 'eveningCount' | 'crossUtilCount' | 'morningCount' | 'regularCount' | 'irregularCount' | 'newRiderCount'
+type SortCol = 'city' | 'totalRiders' | 'eveningCount' | 'crossUtilCount' | 'morningCount' | 'avgMorningAtp' | 'avgEveningAtp'
 type SortDir = 'asc' | 'desc'
 
 export default function RiderProfilingPage() {
@@ -118,8 +120,10 @@ export default function RiderProfilingPage() {
   }
 
   const displayCities = [...unsortedCities].sort((a, b) => {
-    const v = sortCol === 'city' ? a.city.localeCompare(b.city) : (a[sortCol] as number) - (b[sortCol] as number)
-    return sortDir === 'asc' ? v : -v
+    if (sortCol === 'city') return sortDir === 'asc' ? a.city.localeCompare(b.city) : b.city.localeCompare(a.city)
+    const av = (a[sortCol] as number | null) ?? -1
+    const bv = (b[sortCol] as number | null) ?? -1
+    return sortDir === 'asc' ? av - bv : bv - av
   })
 
   const grandTotal = {
@@ -127,13 +131,20 @@ export default function RiderProfilingPage() {
     eveningCount: displayCities.reduce((s, c) => s + c.eveningCount, 0),
     crossUtilCount: displayCities.reduce((s, c) => s + c.crossUtilCount, 0),
     morningCount: displayCities.reduce((s, c) => s + c.morningCount, 0),
-    regularCount: displayCities.reduce((s, c) => s + c.regularCount, 0),
-    irregularCount: displayCities.reduce((s, c) => s + c.irregularCount, 0),
-    newRiderCount: displayCities.reduce((s, c) => s + c.newRiderCount, 0),
   }
 
   const fmt = (count: number, pct: number) => showPct ? formatPct(pct) : formatNumber(count)
   const fmtTotal = (count: number, denom: number) => showPct ? formatPct(denom > 0 ? (count / denom) * 100 : 0) : formatNumber(count)
+
+  // Format decimal hour (e.g. 9.75) → "9:45 AM"
+  function fmtHr(h: number | null): string {
+    if (h == null) return '—'
+    const hh = Math.floor(h)
+    const mm = Math.round((h - hh) * 60)
+    const suffix = hh >= 12 ? 'PM' : 'AM'
+    const display = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+    return `${display}:${mm.toString().padStart(2, '0')} ${suffix}`
+  }
 
   const SortIcon = ({ col }: { col: SortCol }) => (
     <span className="ml-1 inline-block opacity-50">
@@ -141,43 +152,81 @@ export default function RiderProfilingPage() {
     </span>
   )
 
+  function exportProfileCsv(cityFilter?: string) {
+    const header = ['Level', 'City', 'Hub', 'Rider ID', 'Rider Name', 'Behaviour', 'Regularity',
+      'Login Rate %', 'Avg/Day', 'Evening', 'Cross', 'Morning', 'M.ATP', 'E.ATP', 'Active Since (days)']
+    const rows: string[][] = [header]
+    const allHubs: HubData[] = data?.hubs ?? []
+    const targetCities = cityFilter ? displayCities.filter(c => c.city === cityFilter) : displayCities
+    for (const city of targetCities) {
+      rows.push(['City', city.city, '', '', '', '', '', '',
+        formatNumber(city.totalRiders), formatNumber(city.eveningCount), formatNumber(city.crossUtilCount),
+        formatNumber(city.morningCount), city.avgMorningAtp?.toFixed(1) ?? '—', city.avgEveningAtp?.toFixed(1) ?? '—', ''])
+      for (const hub of allHubs.filter(h => h.city === city.city)) {
+        rows.push(['Hub', city.city, hub.hub, '', '', '', '', '',
+          formatNumber(hub.totalRiders), formatNumber(hub.eveningCount), formatNumber(hub.crossUtilCount),
+          formatNumber(hub.morningCount), hub.avgMorningAtp?.toFixed(1) ?? '—', hub.avgEveningAtp?.toFixed(1) ?? '—', ''])
+        for (const rider of riders.filter(r => r.hub === hub.hub && (cityFilter ? r.city === cityFilter : true))) {
+          rows.push(['Rider', city.city, hub.hub, rider.riderId, rider.riderName,
+            rider.loginBehaviourTag, rider.regularityTag,
+            rider.loginRatePct.toFixed(1) + '%', '1',
+            String(rider.eveningLogins), '—', String(rider.morningLogins),
+            rider.avgMorningAtp?.toFixed(1) ?? '—', rider.avgEveningAtp?.toFixed(1) ?? '—',
+            String(rider.activeSinceDays)])
+        }
+      }
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `RiderProfile_${cityFilter ?? 'All'}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-900">Rider Profiling</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Login behaviour and regularity classification · Last 30 days</p>
+      <div className="animate-fade-in">
+        <h1 className="text-lg font-bold text-slate-900 tracking-tight">Rider Profile</h1>
+        <p className="text-[13px] text-slate-500 mt-0.5">Login behaviour and regularity classification · Last 30 days</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <StatCard label="Total Riders" value={formatNumber(total)} />
-        <StatCard label="Evening" value={formatNumber(kpi.eveningCount)} sub={formatPct(kpi.eveningCount * 100 / total)} accent="purple" />
-        <StatCard label="Cross Utilised" value={formatNumber(kpi.crossUtilCount)} sub={formatPct(kpi.crossUtilCount * 100 / total)} accent="sky" />
-        <StatCard label="Morning" value={formatNumber(kpi.morningCount)} sub={formatPct(kpi.morningCount * 100 / total)} accent="amber" />
-        <StatCard label="Regular" value={formatNumber(kpi.regularCount)} sub={formatPct(kpi.regularCount * 100 / total)} accent="green" />
-        <StatCard label="Irregular" value={formatNumber(kpi.irregularCount)} sub={formatPct(kpi.irregularCount * 100 / total)} accent="amber" />
-        <StatCard label="New Riders" value={formatNumber(kpi.newRiderCount)} sub={formatPct(kpi.newRiderCount * 100 / total)} accent="sky" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 stagger-children">
+        <StatCard label="Total Active Riders" value={formatNumber(total)} />
+        <StatCard label="Morning" value={formatPct(kpi.morningCount * 100 / total)} sub={formatNumber(kpi.morningCount) + ' riders'} accent="amber" />
+        <StatCard label="Evening" value={formatPct(kpi.eveningCount * 100 / total)} sub={formatNumber(kpi.eveningCount) + ' riders'} accent="purple" />
+        <StatCard label="Cross Utilised" value={formatPct(kpi.crossUtilCount * 100 / total)} sub={formatNumber(kpi.crossUtilCount) + ' riders'} accent="sky" />
+        <StatCard label="Regular Riders" value={formatPct(kpi.regularCount * 100 / total)} sub={formatNumber(kpi.regularCount) + ' of ' + formatNumber(total)} accent="green" />
+        <StatCard label="Irregular Riders" value={formatPct(kpi.irregularCount * 100 / total)} sub={formatNumber(kpi.irregularCount) + ' riders'} accent="red" />
+        <StatCard label="New Riders" value={formatPct(kpi.newRiderCount * 100 / total)} sub={formatNumber(kpi.newRiderCount) + ' riders'} accent="amber" />
       </div>
 
       <MatrixTable />
 
-      <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+      <div className="filter-bar">
         <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search rider..." className="pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light w-48" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search rider..." className="pl-8 pr-3 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] w-48 transition-shadow" />
         </div>
-        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
+        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
           <option value="all">All Behaviours</option>
           {BEHAVIOUR_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
+        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
           <option value="all">All Regularity</option>
           {REGULARITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        {!showAll && <button onClick={() => { setSearch(''); setBehaviourFilter('all'); setRegularityFilter('all') }} className="text-xs text-slate-500 hover:text-slate-800 underline">Clear filters</button>}
-        <div className="ml-auto flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
-          <button onClick={() => setShowPct(false)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${!showPct ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Hash className="w-3 h-3" />Count</button>
-          <button onClick={() => setShowPct(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${showPct ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Percent className="w-3 h-3" />%</button>
+        {!showAll && (
+          <div className="flex items-center gap-2">
+            {behaviourFilter !== 'all' && <span className="filter-chip">{behaviourFilter}<button onClick={() => setBehaviourFilter('all')}>×</button></span>}
+            {regularityFilter !== 'all' && <span className="filter-chip">{regularityFilter}<button onClick={() => setRegularityFilter('all')}>×</button></span>}
+            {search && <span className="filter-chip">&quot;{search}&quot;<button onClick={() => setSearch('')}>×</button></span>}
+            <button onClick={() => { setSearch(''); setBehaviourFilter('all'); setRegularityFilter('all') }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+          <button onClick={() => setShowPct(false)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200 ${!showPct ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Hash className="w-3 h-3" />Count</button>
+          <button onClick={() => setShowPct(true)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200 ${showPct ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Percent className="w-3 h-3" />%</button>
         </div>
       </div>
 
@@ -191,26 +240,34 @@ export default function RiderProfilingPage() {
             : `${formatNumber(total)} riders (filtered) · ${displayCities.length} cities`}
       </p>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+          <span className="text-[10px] text-slate-400 font-mono">{displayCities.length} cities · {(data?.hubs ?? []).length} hubs · {riders.length} riders</span>
+          <button
+            onClick={() => exportProfileCsv()}
+            className="btn-secondary !py-1 !px-2.5 !text-[10px] !gap-1"
+          >
+            <Download className="w-3 h-3" /> Export All
+          </button>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="data-table">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="text-left px-4 py-3 font-medium text-slate-500 uppercase tracking-wide w-60 cursor-pointer select-none" onClick={() => toggleSort('city')}>City / Hub / Rider<SortIcon col="city" /></th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('totalRiders')}>Avg/Day<SortIcon col="totalRiders" /></th>
-                <th className="text-right px-3 py-3 font-medium text-indigo-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('eveningCount')}>Evening{showPct ? ' %' : ''}<SortIcon col="eveningCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-violet-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('crossUtilCount')}>Cross{showPct ? ' %' : ''}<SortIcon col="crossUtilCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-orange-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('morningCount')}>Morning{showPct ? ' %' : ''}<SortIcon col="morningCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-emerald-600 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('regularCount')}>Regular{showPct ? ' %' : ''}<SortIcon col="regularCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-amber-600 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('irregularCount')}>Irregular{showPct ? ' %' : ''}<SortIcon col="irregularCount" /></th>
-                <th className="text-right px-3 py-3 font-medium text-sky-500 uppercase tracking-wide cursor-pointer select-none" onClick={() => toggleSort('newRiderCount')}>New{showPct ? ' %' : ''}<SortIcon col="newRiderCount" /></th>
-                <th className="px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Behaviour</th>
-                <th className="px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Regularity</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Login Rate</th>
-                <th className="text-right px-4 py-3 font-medium text-slate-500 uppercase tracking-wide">Active</th>
+              <tr>
+                <th className="text-left w-60 cursor-pointer" onClick={() => toggleSort('city')}>City / Hub / Rider<SortIcon col="city" /></th>
+                <th className="text-right cursor-pointer" onClick={() => toggleSort('totalRiders')}>Avg/Day<SortIcon col="totalRiders" /></th>
+                <th className="text-right cursor-pointer !text-indigo-500" onClick={() => toggleSort('eveningCount')}>Evening{showPct ? ' %' : ''}<SortIcon col="eveningCount" /></th>
+                <th className="text-right cursor-pointer !text-violet-500" onClick={() => toggleSort('crossUtilCount')}>Cross{showPct ? ' %' : ''}<SortIcon col="crossUtilCount" /></th>
+                <th className="text-right cursor-pointer !text-orange-500" onClick={() => toggleSort('morningCount')}>Morning{showPct ? ' %' : ''}<SortIcon col="morningCount" /></th>
+                <th className="text-right cursor-pointer !text-orange-400" onClick={() => toggleSort('avgMorningAtp')}>M. ATP<SortIcon col="avgMorningAtp" /></th>
+                <th className="text-right cursor-pointer !text-indigo-400" onClick={() => toggleSort('avgEveningAtp')}>E. ATP<SortIcon col="avgEveningAtp" /></th>
+                <th>Behaviour</th>
+                <th>Regularity</th>
+                <th className="text-right">Login Rate</th>
+                <th className="text-right">Active</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {displayCities.map(city => {
                 const cityHubs = hubs.filter(h => h.city === city.city)
                 const cityExpanded = expandedCities.has(city.city)
@@ -228,22 +285,21 @@ export default function RiderProfilingPage() {
                     showAll={showAll}
                     showPct={showPct}
                     fmt={fmt}
+                    fmtHr={fmtHr}
                     onToggleCity={toggleCity}
                     onToggleHub={toggleHub}
                     onToggleRider={toggleRider}
+                    onExport={exportProfileCsv}
                   />
                 )
               })}
-              <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
+              <tr className="grand-total">
                 <td className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">Grand Total</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-slate-900">{formatNumber(grandTotal.totalRiders)}</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-indigo-700">{fmtTotal(grandTotal.eveningCount, grandTotal.totalRiders)}</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-violet-700">{fmtTotal(grandTotal.crossUtilCount, grandTotal.totalRiders)}</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-orange-700">{fmtTotal(grandTotal.morningCount, grandTotal.totalRiders)}</td>
-                <td className="text-right px-3 py-3 font-mono font-bold text-emerald-700">{fmtTotal(grandTotal.regularCount, grandTotal.totalRiders)}</td>
-                <td className="text-right px-3 py-3 font-mono font-bold text-amber-700">{fmtTotal(grandTotal.irregularCount, grandTotal.totalRiders)}</td>
-                <td className="text-right px-3 py-3 font-mono font-bold text-sky-700">{fmtTotal(grandTotal.newRiderCount, grandTotal.totalRiders)}</td>
-                <td colSpan={4} className="px-3 py-3 text-slate-400 text-[10px]">—</td>
+                <td colSpan={6} className="px-3 py-3 text-slate-400 text-[10px]">—</td>
               </tr>
             </tbody>
           </table>
@@ -265,15 +321,17 @@ interface CityGroupProps {
   showAll: boolean
   showPct: boolean
   fmt: (count: number, pct: number) => string
+  fmtHr: (h: number | null) => string
   onToggleCity: (city: string) => void
   onToggleHub: (hub: string) => void
   onToggleRider: (riderId: string) => void
+  onExport: (city: string) => void
 }
 
 function CityGroup({
   city, cityHubs, cityExpanded, expandedHubs, expandedRiders,
-  hubMap, riders, ridersLoading, showAll, fmt,
-  onToggleCity, onToggleHub, onToggleRider,
+  hubMap, riders, ridersLoading, showAll, fmt, fmtHr,
+  onToggleCity, onToggleHub, onToggleRider, onExport,
 }: CityGroupProps) {
   return (
     <>
@@ -283,15 +341,15 @@ function CityGroup({
             {cityExpanded ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
             <span className="text-slate-900 font-semibold">{city.city}</span>
             <span className="text-[10px] text-slate-400 bg-slate-200/70 px-1.5 py-0.5 rounded">{cityHubs.length} hubs</span>
+            <button onClick={e => { e.stopPropagation(); onExport(city.city) }} className="ml-1 text-slate-300 hover:text-slate-600 transition-colors" title={`Export ${city.city}`}><Download className="w-3 h-3" /></button>
           </div>
         </td>
         <td className="text-right px-3 py-3 font-mono font-semibold text-slate-800">{formatNumber(city.totalRiders)}</td>
         <td className="text-right px-3 py-3 font-mono text-indigo-600">{fmt(city.eveningCount, city.eveningRiderPct)}</td>
         <td className="text-right px-3 py-3 font-mono text-violet-600">{fmt(city.crossUtilCount, city.crossUtilisedPct)}</td>
         <td className="text-right px-3 py-3 font-mono text-orange-600">{fmt(city.morningCount, city.morningRiderPct)}</td>
-        <td className="text-right px-3 py-3 font-mono text-emerald-600">{fmt(city.regularCount, city.regularPct)}</td>
-        <td className="text-right px-3 py-3 font-mono text-amber-600">{fmt(city.irregularCount, city.irregularPct)}</td>
-        <td className="text-right px-3 py-3 font-mono text-sky-600">{fmt(city.newRiderCount, city.newRiderPct)}</td>
+        <td className="text-right px-3 py-3 font-mono text-orange-500">{city.avgMorningAtp != null ? city.avgMorningAtp.toFixed(1) : '—'}</td>
+        <td className="text-right px-3 py-3 font-mono text-indigo-500">{city.avgEveningAtp != null ? city.avgEveningAtp.toFixed(1) : '—'}</td>
         <td colSpan={4} className="px-3 py-3 text-slate-300 text-[10px]">—</td>
       </tr>
 
@@ -307,6 +365,7 @@ function CityGroup({
             ridersLoading={ridersLoading}
             expandedRiders={expandedRiders}
             fmt={fmt}
+            fmtHr={fmtHr}
             onToggleHub={onToggleHub}
             onToggleRider={onToggleRider}
           />
@@ -323,11 +382,12 @@ interface HubGroupProps {
   ridersLoading: boolean
   expandedRiders: Set<string>
   fmt: (count: number, pct: number) => string
+  fmtHr: (h: number | null) => string
   onToggleHub: (hub: string) => void
   onToggleRider: (riderId: string) => void
 }
 
-function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, fmt, onToggleHub, onToggleRider }: HubGroupProps) {
+function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, fmt, fmtHr, onToggleHub, onToggleRider }: HubGroupProps) {
   return (
     <>
       <tr className="bg-white hover:bg-sfx-orange/5 cursor-pointer transition-colors" onClick={() => onToggleHub(hub.hub)}>
@@ -342,9 +402,8 @@ function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, 
         <td className="text-right px-3 py-2.5 font-mono text-indigo-500">{fmt(hub.eveningCount, hub.eveningRiderPct)}</td>
         <td className="text-right px-3 py-2.5 font-mono text-violet-500">{fmt(hub.crossUtilCount, hub.crossUtilisedPct)}</td>
         <td className="text-right px-3 py-2.5 font-mono text-orange-500">{fmt(hub.morningCount, hub.morningRiderPct)}</td>
-        <td className="text-right px-3 py-2.5 font-mono text-emerald-500">{fmt(hub.regularCount, hub.regularPct)}</td>
-        <td className="text-right px-3 py-2.5 font-mono text-amber-500">{fmt(hub.irregularCount, hub.irregularPct)}</td>
-        <td className="text-right px-3 py-2.5 font-mono text-sky-500">{fmt(hub.newRiderCount, hub.newRiderPct)}</td>
+        <td className="text-right px-3 py-2.5 font-mono text-orange-400">{hub.avgMorningAtp != null ? hub.avgMorningAtp.toFixed(1) : '—'}</td>
+        <td className="text-right px-3 py-2.5 font-mono text-indigo-400">{hub.avgEveningAtp != null ? hub.avgEveningAtp.toFixed(1) : '—'}</td>
         <td colSpan={4} className="px-3 py-2.5 text-slate-300 text-[10px]">—</td>
       </tr>
 
@@ -361,6 +420,15 @@ function HubGroup({ hub, hubRiders, hubExpanded, ridersLoading, expandedRiders, 
       ))}
     </>
   )
+}
+
+function fmtHrStatic(h: number | null): string {
+  if (h == null) return '—'
+  const hh = Math.floor(h)
+  const mm = Math.round((h - hh) * 60)
+  const suffix = hh >= 12 ? 'PM' : 'AM'
+  const display = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+  return `${display}:${mm.toString().padStart(2, '0')} ${suffix}`
 }
 
 function RiderRowGroup({ rider, expanded, onToggle }: { rider: RiderData; expanded: boolean; onToggle: (id: string) => void }) {
@@ -380,7 +448,10 @@ function RiderRowGroup({ rider, expanded, onToggle }: { rider: RiderData; expand
           </div>
         </td>
         <td className="text-right px-3 py-2.5 text-slate-300 text-[10px]">—</td>
-        <td colSpan={6} className="px-3 py-2.5 text-slate-300 text-[10px]">—</td>
+        <td className="text-right px-3 py-2.5 text-slate-300 text-[10px]">—</td>
+        <td className="text-right px-3 py-2.5 text-slate-300 text-[10px]">—</td>
+        <td className="text-right px-3 py-2.5 font-mono text-orange-400 text-[10px]">{rider.avgMorningAtp != null ? rider.avgMorningAtp.toFixed(1) : '—'}</td>
+        <td className="text-right px-3 py-2.5 font-mono text-indigo-400 text-[10px]">{rider.avgEveningAtp != null ? rider.avgEveningAtp.toFixed(1) : '—'}</td>
         <td className="px-3 py-2.5"><BehaviourBadge tag={rider.loginBehaviourTag} /></td>
         <td className="px-3 py-2.5"><RegularityBadge tag={rider.regularityTag} /></td>
         <td className={`text-right px-3 py-2.5 font-mono font-semibold ${rider.loginRatePct >= 80 ? 'text-emerald-600' : rider.loginRatePct >= 50 ? 'text-amber-600' : 'text-red-500'}`}>

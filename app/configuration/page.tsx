@@ -85,17 +85,17 @@ export default function ConfigurationPage() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3 animate-fade-in">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Configuration</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Display thresholds apply immediately · Data classification rules require re-ingest to update backend views</p>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight">Configuration</h1>
+          <p className="text-[13px] text-slate-500 mt-0.5">Display thresholds apply immediately · Data classification rules require re-ingest to update backend views</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={handleReset} className="flex items-center gap-1.5 px-3 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+          <button onClick={handleReset} className="btn-secondary flex items-center gap-1.5">
             <RotateCcw className="w-3.5 h-3.5" />
             Reset Defaults
           </button>
-          <button onClick={handleSave} className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${saved ? 'bg-emerald-600 text-white' : 'bg-sfx-orange text-white hover:bg-sfx-orange-dark'}`}>
+          <button onClick={handleSave} className={`btn-primary flex items-center gap-1.5 !px-4 ${saved ? '!bg-emerald-600 !border-emerald-600' : ''}`}>
             {saved ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
             {saved ? 'Saved' : 'Save Changes'}
           </button>
@@ -103,16 +103,16 @@ export default function ConfigurationPage() {
       </div>
 
       {SECTIONS.map((section) => (
-        <div key={section.title} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50">
-            <h2 className="text-sm font-semibold text-slate-700">{section.title}</h2>
+        <div key={section.title} className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">{section.title}</h2>
           </div>
           <div className="divide-y divide-slate-100">
             {section.fields.map((field) => (
               <div key={String(field.key)} className="px-5 py-4 flex items-start gap-6">
                 <div className="flex-1 min-w-0">
-                  <label className="block text-sm font-medium text-slate-800 mb-0.5">{field.label}</label>
-                  <p className="text-xs text-slate-400 leading-relaxed">{field.description}</p>
+                  <label className="block text-[13px] font-semibold text-slate-800 mb-0.5">{field.label}</label>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">{field.description}</p>
                 </div>
                 <div className="shrink-0">
                   <input
@@ -121,13 +121,13 @@ export default function ConfigurationPage() {
                     onChange={e => handleChange(field.key, e.target.value)}
                     min={field.min}
                     max={field.max}
-                    className="w-44 px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light tabular-nums text-right"
+                    className="w-44 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-all tabular-nums text-right font-medium"
                   />
                   {field.type === 'number' && field.min !== undefined && field.max !== undefined && (
-                    <p className="text-xs text-slate-400 text-right mt-1">{field.min}–{field.max}</p>
+                    <p className="text-[10px] text-slate-400 text-right mt-1">{field.min}–{field.max}</p>
                   )}
                   {field.note && (
-                    <p className="text-xs text-slate-400 text-right mt-1 italic">{field.note}</p>
+                    <p className="text-[10px] text-slate-400 text-right mt-1 italic">{field.note}</p>
                   )}
                 </div>
               </div>

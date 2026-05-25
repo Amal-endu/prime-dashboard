@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import {
   ChevronRight, ChevronDown, Search, SlidersHorizontal,
-  CheckCircle2, Loader2,
+  CheckCircle2, Loader2, Download,
 } from 'lucide-react'
 import { StatCard } from '@/components/stat-card'
 import { BehaviourBadge, RegularityBadge } from '@/components/profile-badges'
@@ -15,24 +15,12 @@ import type { LoginBehaviourTag, RegularityTag } from '@/lib/types'
 import { useConfigState } from '@/components/config-provider'
 import { useToast } from '@/components/toast-provider'
 import { toApiParams } from '@/lib/config-params'
-
-const DATE_PRESETS = [
-  { label: 'Today', value: 'today' },
-  { label: 'D-1', value: 'd1' },
-  { label: 'D-2', value: 'd2' },
-  { label: 'D-3', value: 'd3' },
-  { label: 'D-4', value: 'd4' },
-  { label: 'D-5', value: 'd5' },
-  { label: 'D-6', value: 'd6' },
-  { label: 'D-7', value: 'd7' },
-  { label: 'L7D', value: 'l7d' },
-  { label: 'L30D', value: 'l30d' },
-]
+import { buildDatePresets } from '@/lib/date-presets'
 
 const BEHAVIOUR_OPTIONS: LoginBehaviourTag[] = ['Evening Rider', 'Cross Utilised', 'Morning Rider']
 const REGULARITY_OPTIONS: RegularityTag[] = ['Regular', 'Irregular', 'New Rider']
 
-const RIDER_TABLE_COL_SPAN = 14
+const RIDER_TABLE_COL_SPAN = 9
 
 interface CityRow {
   city: string; ridersLoggedIn: number; assigned3MR: number; attempted3MR: number
@@ -58,6 +46,7 @@ export default function RiderDetailsPage() {
   const toast = useToast()
   const [data, setData] = useState<ApiData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [maxDateRaw, setMaxDateRaw] = useState<string | null>(null)
   const [datePreset, setDatePreset] = useState('today')
   const [sddMode, setSddMode] = useState<'3mr' | 'overall'>('3mr')
   const [behaviourFilter, setBehaviourFilter] = useState('all')
@@ -66,6 +55,10 @@ export default function RiderDetailsPage() {
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set())
   const [expandedRiders, setExpandedRiders] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    fetch('/api/status').then(r => r.json()).then(d => setMaxDateRaw(d.maxDateRaw ?? null)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -105,10 +98,10 @@ export default function RiderDetailsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap animate-fade-in">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Rider Details</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Login activity, productivity and earnings</p>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight">Rider Perf Trend</h1>
+          <p className="text-[13px] text-slate-500 mt-0.5">Login activity, productivity and earnings</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500 font-medium">View:</span>
@@ -137,7 +130,7 @@ export default function RiderDetailsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 stagger-children">
         <StatCard label="Riders Active" value={formatNumber(totalRiders)} accent="orange" />
         <StatCard label="Avg Attempt %" value={formatPct(grandAttemptPct)} sub="attempted / assigned" accent="amber" />
         <StatCard label="Avg Del %" value={formatPct(grandDeliveredPct)} sub="delivered / assigned" accent="green" />
@@ -149,7 +142,7 @@ export default function RiderDetailsPage() {
 
       <TrendCharts sddMode={sddMode} configVersion={configVersion} config={config} />
 
-      <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+      <div className="filter-bar">
         <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -157,13 +150,13 @@ export default function RiderDetailsPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search rider..."
-            className="pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light w-48"
+            className="pl-8 pr-3 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] w-48 transition-shadow"
           />
         </div>
         <select
           value={behaviourFilter}
           onChange={e => setBehaviourFilter(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light"
+          className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow"
         >
           <option value="all">All Behaviours</option>
           {BEHAVIOUR_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
@@ -171,26 +164,31 @@ export default function RiderDetailsPage() {
         <select
           value={regularityFilter}
           onChange={e => setRegularityFilter(e.target.value)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light"
+          className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow"
         >
           <option value="all">All Regularity</option>
           {REGULARITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
         {isFiltered && (
-          <button
-            onClick={() => { setBehaviourFilter('all'); setRegularityFilter('all') }}
-            className="text-xs text-slate-500 hover:text-slate-800 underline"
-          >
-            Clear filters
-          </button>
+          <div className="flex items-center gap-2">
+            {behaviourFilter !== 'all' && <span className="filter-chip">{behaviourFilter}<button onClick={() => setBehaviourFilter('all')}>×</button></span>}
+            {regularityFilter !== 'all' && <span className="filter-chip">{regularityFilter}<button onClick={() => setRegularityFilter('all')}>×</button></span>}
+            {search && <span className="filter-chip">&quot;{search}&quot;<button onClick={() => setSearch('')}>×</button></span>}
+            <button
+              onClick={() => { setBehaviourFilter('all'); setRegularityFilter('all'); setSearch('') }}
+              className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
         )}
 
         <div className="ml-auto flex flex-wrap gap-1">
-          {DATE_PRESETS.map(p => (
+          {buildDatePresets(maxDateRaw).map(p => (
             <button
               key={p.value}
               onClick={() => setDatePreset(p.value)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-sfx-orange text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-[var(--sfx-orange)] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               {p.label}
             </button>
@@ -203,28 +201,33 @@ export default function RiderDetailsPage() {
         {isFiltered && <span className="text-sfx-orange ml-1">(filtered)</span>}
       </p>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+          <span className="text-[10px] text-slate-400 font-mono">{cities.length} cities · {hubs.length} hubs · {riders.length} riders</span>
+          <button
+            onClick={() => exportDailyPerfCsv('DailyPerf_All', cities, hubs, riders)}
+            className="btn-secondary !py-1 !px-2.5 !text-[10px] !gap-1"
+            title="Export all cities, hubs and riders as CSV"
+          >
+            <Download className="w-3 h-3" /> Export All
+          </button>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="data-table">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="text-left px-4 py-3 font-medium text-slate-500 uppercase tracking-wide w-60">City / Hub / Rider</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Riders</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Assigned 3MR</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Attempted</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Delivered</th>
-                <th className="text-right px-3 py-3 font-medium text-amber-600 uppercase tracking-wide">Attempt %</th>
-                <th className="text-right px-3 py-3 font-medium text-emerald-600 uppercase tracking-wide">Del %</th>
-                <th className="text-right px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Avg Earnings</th>
-                <th className="text-right px-3 py-3 font-medium text-orange-500 uppercase tracking-wide">Morn Avg Prod</th>
-                <th className="text-right px-3 py-3 font-medium text-indigo-500 uppercase tracking-wide">Eve Avg Prod</th>
-                <th className="text-right px-3 py-3 font-medium text-orange-400 uppercase tracking-wide">Morn RS Hr</th>
-                <th className="text-right px-3 py-3 font-medium text-indigo-400 uppercase tracking-wide">Eve RS Hr</th>
-                <th className="px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Shift</th>
-                <th className="px-3 py-3 font-medium text-slate-500 uppercase tracking-wide">Regularity</th>
+              <tr>
+                <th className="text-left w-60">City / Hub / Rider</th>
+                <th className="text-right">Riders</th>
+                <th className="text-right">Assigned 3MR</th>
+                <th className="text-right">Attempted</th>
+                <th className="text-right">Delivered</th>
+                <th className="text-right !text-amber-600">Attempt %</th>
+                <th className="text-right !text-emerald-600">Del %</th>
+                <th className="text-right">Avg Earnings</th>
+                <th className="text-left">Shift</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {cities.map(city => {
                 const cityHubs = hubs.filter(h => h.city === city.city)
                 const cityExpanded = expandedCities.has(city.city)
@@ -241,21 +244,23 @@ export default function RiderDetailsPage() {
                     onToggleCity={toggleCity}
                     onToggleHub={toggleHub}
                     onToggleRider={toggleRider}
+                    allHubs={hubs}
+                    allRiders={riders}
                   />
                 )
               })}
 
               {cities.length > 0 && (
-                <tr className="bg-slate-900 text-white font-semibold">
-                  <td className="px-4 py-3 font-semibold text-xs uppercase tracking-wide">Total</td>
+                <tr className="grand-total">
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">Total</td>
                   <td className="text-right px-3 py-3 font-mono">{formatNumber(totalRiders)}</td>
                   <td className="text-right px-3 py-3 font-mono">{formatNumber(totalAssigned)}</td>
                   <td className="text-right px-3 py-3 font-mono">{formatNumber(totalAttempted)}</td>
                   <td className="text-right px-3 py-3 font-mono">{formatNumber(totalDelivered)}</td>
-                  <td className="text-right px-3 py-3 font-mono text-amber-300">{formatPct(grandAttemptPct)}</td>
-                  <td className="text-right px-3 py-3 font-mono text-emerald-300">{formatPct(grandDeliveredPct)}</td>
-                  <td className="text-right px-3 py-3 font-mono text-emerald-300">{formatCurrency(avgEarnings)}</td>
-                  <td colSpan={6} className="px-3 py-3 text-slate-600 text-[10px]">—</td>
+                  <td className="text-right px-3 py-3 font-mono text-amber-600">{formatPct(grandAttemptPct)}</td>
+                  <td className="text-right px-3 py-3 font-mono text-emerald-600">{formatPct(grandDeliveredPct)}</td>
+                  <td className="text-right px-3 py-3 font-mono text-emerald-600">{formatCurrency(avgEarnings)}</td>
+                  <td colSpan={1} className="px-3 py-3 text-slate-400 text-[10px]">—</td>
                 </tr>
               )}
             </tbody>
@@ -264,6 +269,48 @@ export default function RiderDetailsPage() {
       </div>
     </div>
   )
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportDailyPerfCsv(
+  label: string,
+  cities: CityRow[],
+  hubs: HubRow[],
+  riders: RiderRow[],
+  cityFilter?: string,
+) {
+  const header = ['Level', 'City', 'Hub', 'Rider ID', 'Rider Name', 'Behaviour', 'Regularity',
+    'Riders', 'Assigned 3MR', 'Attempted', 'Delivered', 'Attempt %', 'Del %', 'Avg Earnings']
+  const rows: string[][] = [header]
+
+  const targetCities = cityFilter ? cities.filter(c => c.city === cityFilter) : cities
+  for (const city of targetCities) {
+    rows.push(['City', city.city, '', '', '', '', '',
+      String(city.ridersLoggedIn), String(city.assigned3MR), String(city.attempted3MR), String(city.delivered3MR),
+      city.avgAttemptProductivityPct.toFixed(1) + '%', city.avgDeliveredProductivityPct.toFixed(1) + '%',
+      city.ridersLoggedIn > 0 ? (city.totalEarnings3MR / city.ridersLoggedIn).toFixed(0) : '0'])
+    for (const hub of hubs.filter(h => h.city === city.city)) {
+      rows.push(['Hub', city.city, hub.hub, '', '', '', '',
+        String(hub.ridersLoggedIn), String(hub.assigned3MR), String(hub.attempted3MR), String(hub.delivered3MR),
+        hub.avgAttemptProductivityPct.toFixed(1) + '%', hub.avgDeliveredProductivityPct.toFixed(1) + '%',
+        hub.ridersLoggedIn > 0 ? (hub.totalEarnings3MR / hub.ridersLoggedIn).toFixed(0) : '0'])
+      for (const rider of riders.filter(r => r.hub === hub.hub)) {
+        rows.push(['Rider', city.city, hub.hub, rider.riderId, rider.riderName,
+          rider.loginBehaviourTag, rider.regularityTag,
+          '1', String(rider.assigned3MR), String(rider.attempted3MR), String(rider.delivered3MR),
+          rider.attemptProductivityPct.toFixed(1) + '%', rider.deliveredProductivityPct.toFixed(1) + '%',
+          rider.earnings3MR.toFixed(0)])
+      }
+    }
+  }
+  downloadCsv(`${label}.csv`, rows)
 }
 
 interface CitySectionProps {
@@ -277,12 +324,15 @@ interface CitySectionProps {
   onToggleCity: (city: string) => void
   onToggleHub: (hub: string) => void
   onToggleRider: (riderId: string) => void
+  allHubs: HubRow[]
+  allRiders: RiderRow[]
 }
 
 function CitySection({
   city, cityHubs, cityExpanded, expandedHubs, expandedRiders,
   filteredRiders, dateRange,
   onToggleCity, onToggleHub, onToggleRider,
+  allHubs, allRiders,
 }: CitySectionProps) {
   return (
     <>
@@ -292,6 +342,13 @@ function CitySection({
             {cityExpanded ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
             <span className="font-semibold text-slate-900">{city.city}</span>
             <span className="text-[10px] text-slate-400 bg-slate-200/70 px-1.5 py-0.5 rounded">{cityHubs.length} hubs</span>
+            <button
+              onClick={e => { e.stopPropagation(); exportDailyPerfCsv(`DailyPerf_${city.city}`, [city], allHubs, allRiders, city.city) }}
+              className="ml-1 text-slate-300 hover:text-slate-600 transition-colors"
+              title={`Export ${city.city} with all hubs and riders`}
+            >
+              <Download className="w-3 h-3" />
+            </button>
           </div>
         </td>
         <td className="text-right px-3 py-3 font-mono font-semibold text-sfx-orange-dark">{formatNumber(city.ridersLoggedIn)}</td>
@@ -303,7 +360,7 @@ function CitySection({
         <td className="text-right px-3 py-3 font-mono font-semibold text-emerald-600">
           {formatCurrency(city.ridersLoggedIn > 0 ? city.totalEarnings3MR / city.ridersLoggedIn : 0)}
         </td>
-        <td colSpan={6} className="px-3 py-3 text-slate-300 text-[10px]">—</td>
+        <td className="px-3 py-3 text-slate-300 text-[10px]">—</td>
       </tr>
 
       {cityExpanded && cityHubs.map(hub => {
@@ -356,7 +413,7 @@ function HubSection({ hub, hubRiders, hubExpanded, expandedRiders, dateRange, on
         <td className="text-right px-3 py-2.5 font-mono text-slate-600">
           {formatCurrency(hub.ridersLoggedIn > 0 ? hub.totalEarnings3MR / hub.ridersLoggedIn : 0)}
         </td>
-        <td colSpan={6} className="px-3 py-2.5 text-slate-300 text-[10px]">—</td>
+        <td className="px-3 py-2.5 text-slate-300 text-[10px]">—</td>
       </tr>
 
       {hubExpanded && hubRiders.map(rider => (
@@ -404,20 +461,7 @@ function RiderSection({ rider, expanded, dateRange, onToggleRider }: RiderSectio
         <td className="text-right px-3 py-2.5"><DelPctCell value={rider.attemptProductivityPct} /></td>
         <td className="text-right px-3 py-2.5"><DelPctCell value={rider.deliveredProductivityPct} /></td>
         <td className="text-right px-3 py-2.5 font-mono font-semibold text-emerald-600">{formatCurrency(rider.earnings3MR)}</td>
-        <td className="text-right px-3 py-2.5 font-mono text-orange-600">
-          {rider.avgMorningProductivity != null ? rider.avgMorningProductivity : <span className="text-slate-300">—</span>}
-        </td>
-        <td className="text-right px-3 py-2.5 font-mono text-indigo-600">
-          {rider.avgEveningProductivity != null ? rider.avgEveningProductivity : <span className="text-slate-300">—</span>}
-        </td>
-        <td className="text-right px-3 py-2.5 font-mono text-orange-500">
-          {rider.avgMorningRunsheetHr != null ? `${String(Math.floor(rider.avgMorningRunsheetHr)).padStart(2, '0')}:00` : <span className="text-slate-300">—</span>}
-        </td>
-        <td className="text-right px-3 py-2.5 font-mono text-indigo-500">
-          {rider.avgEveningRunsheetHr != null ? `${String(Math.floor(rider.avgEveningRunsheetHr)).padStart(2, '0')}:00` : <span className="text-slate-300">—</span>}
-        </td>
         <td className="px-3 py-2.5"><BehaviourBadge tag={rider.loginBehaviourTag} /></td>
-        <td className="px-3 py-2.5"><RegularityBadge tag={rider.regularityTag} /></td>
       </tr>
       {expanded && dateRange && (
         <RiderDrilldown

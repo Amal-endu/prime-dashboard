@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, SlidersHorizontal, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, SlidersHorizontal, Loader2, Download } from 'lucide-react'
 import { StatCard } from '@/components/stat-card'
 import { BehaviourBadge, RegularityBadge } from '@/components/profile-badges'
 import { DelPctCell } from '@/components/del-pct-cell'
@@ -11,22 +11,10 @@ import type { LoginBehaviourTag, RegularityTag } from '@/lib/types'
 import { useConfigState } from '@/components/config-provider'
 import { useToast } from '@/components/toast-provider'
 import { toApiParams } from '@/lib/config-params'
+import { buildDatePresets } from '@/lib/date-presets'
 
 const BEHAVIOUR_OPTIONS: LoginBehaviourTag[] = ['Evening Rider', 'Cross Utilised', 'Morning Rider']
 const REGULARITY_OPTIONS: RegularityTag[] = ['Regular', 'Irregular', 'New Rider']
-
-const DATE_PRESETS = [
-  { label: 'Today', value: 'today' },
-  { label: 'D-1', value: 'd1' },
-  { label: 'D-2', value: 'd2' },
-  { label: 'D-3', value: 'd3' },
-  { label: 'D-4', value: 'd4' },
-  { label: 'D-5', value: 'd5' },
-  { label: 'D-6', value: 'd6' },
-  { label: 'D-7', value: 'd7' },
-  { label: 'L7D', value: 'l7d' },
-  { label: 'L30D', value: 'l30d' },
-]
 
 type CitySortCol = 'city' | 'orders3MR' | 'delivered3MR' | 'delPct' | 'breachCount' | 'breachPct' | 'trend7' | 'trend30'
 type SortDir = 'asc' | 'desc'
@@ -36,6 +24,7 @@ export default function RiderDeliveryPage() {
   const toast = useToast()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [maxDateRaw, setMaxDateRaw] = useState<string | null>(null)
   const [datePreset, setDatePreset] = useState('today')
   const [behaviourFilter, setBehaviourFilter] = useState<string>('all')
   const [regularityFilter, setRegularityFilter] = useState<string>('all')
@@ -44,6 +33,10 @@ export default function RiderDeliveryPage() {
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set())
   const [sortCol, setSortCol] = useState<CitySortCol>('orders3MR')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  useEffect(() => {
+    fetch('/api/status').then(r => r.json()).then(d => setMaxDateRaw(d.maxDateRaw ?? null)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -101,14 +94,43 @@ export default function RiderDeliveryPage() {
   const gtDelPct = gt.orders > 0 ? (gt.delivered / gt.orders) * 100 : 0
   const gtBreachPct = gt.orders > 0 ? (gt.breaches / gt.orders) * 100 : 0
 
+  function exportDeliveryCsv(cityFilter?: string) {
+    const header = ['Level', 'City', 'Hub', 'Rider ID', 'Rider Name', 'Behaviour', 'Regularity',
+      'Orders', 'Delivered', 'DEL%', 'Breaches', 'Breach%']
+    const rows: string[][] = [header]
+    const targetCities: any[] = cityFilter ? rawCities.filter((c: any) => c.city === cityFilter) : rawCities
+    for (const city of targetCities) {
+      const delPct = city.orders3MR > 0 ? ((city.delivered3MR / city.orders3MR) * 100).toFixed(1) + '%' : '0%'
+      const bPct = city.orders3MR > 0 ? ((city.breachCount / city.orders3MR) * 100).toFixed(1) + '%' : '0%'
+      rows.push(['City', city.city, '', '', '', '', '',
+        String(city.orders3MR), String(city.delivered3MR), delPct, String(city.breachCount), bPct])
+      for (const hub of hubs.filter((h: any) => h.city === city.city)) {
+        const hDelPct = hub.orders3MR > 0 ? ((hub.delivered3MR / hub.orders3MR) * 100).toFixed(1) + '%' : '0%'
+        rows.push(['Hub', city.city, hub.hub, '', '', '', '',
+          String(hub.orders3MR), String(hub.delivered3MR), hDelPct, String(hub.breachCount), hub.breachPct?.toFixed(1) + '%'])
+        for (const rider of riders.filter((r: any) => r.hub === hub.hub)) {
+          const rDelPct = rider.orders3MR > 0 ? ((rider.delivered3MR / rider.orders3MR) * 100).toFixed(1) + '%' : '0%'
+          rows.push(['Rider', city.city, hub.hub, rider.riderId, rider.riderName,
+            rider.behaviourTag ?? '', rider.regularityTag ?? '',
+            String(rider.orders3MR), String(rider.delivered3MR), rDelPct, String(rider.breachCount), '—'])
+        }
+      }
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `Delivery_${cityFilter ?? 'All'}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-900">Rider Delivery</h1>
-        <p className="text-sm text-slate-500 mt-0.5">3MR delivery performance · {dateLabel}</p>
+      <div className="animate-fade-in">
+        <h1 className="text-lg font-bold text-slate-900 tracking-tight">Rider Delivery</h1>
+        <p className="text-[13px] text-slate-500 mt-0.5">3MR delivery performance · {dateLabel}</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 stagger-children">
         <StatCard label="Total 3MR Orders" value={formatNumber(totalOrders)} />
         <StatCard label="Total Delivered" value={formatNumber(totalDelivered)} accent="green" />
         <StatCard label="Overall DEL%" value={formatPct(overallDel)} accent={overallDel >= 80 ? 'green' : overallDel >= 60 ? 'amber' : 'red'} />
@@ -116,25 +138,34 @@ export default function RiderDeliveryPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+      <div className="filter-bar">
         <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
-        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
+        <select value={behaviourFilter} onChange={e => setBehaviourFilter(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
           <option value="all">All Behaviours</option>
           {BEHAVIOUR_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light">
+        <select value={regularityFilter} onChange={e => setRegularityFilter(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
           <option value="all">All Regularity</option>
           {REGULARITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <button onClick={() => setPrimeOnly(p => !p)} className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${primeOnly ? 'bg-sfx-orange text-white border-sfx-orange' : 'bg-white text-slate-600 border-slate-200 hover:border-sfx-orange-light'}`}>C2 Clients</button>
+        <button onClick={() => setPrimeOnly(p => !p)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all duration-200 ${primeOnly ? 'bg-[var(--sfx-orange)] text-white border-[var(--sfx-orange)] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-[var(--sfx-orange-l)]'}`}>C2 Clients</button>
+
+        {(behaviourFilter !== 'all' || regularityFilter !== 'all' || primeOnly) && (
+          <div className="flex items-center gap-2">
+            {behaviourFilter !== 'all' && <span className="filter-chip">{behaviourFilter}<button onClick={() => setBehaviourFilter('all')}>×</button></span>}
+            {regularityFilter !== 'all' && <span className="filter-chip">{regularityFilter}<button onClick={() => setRegularityFilter('all')}>×</button></span>}
+            {primeOnly && <span className="filter-chip">C2 Clients Only<button onClick={() => setPrimeOnly(false)}>×</button></span>}
+            <button onClick={() => { setBehaviourFilter('all'); setRegularityFilter('all'); setPrimeOnly(false) }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
+          </div>
+        )}
 
         {/* Date presets pushed to right */}
         <div className="ml-auto flex flex-wrap gap-1 justify-end">
-          {DATE_PRESETS.map(p => (
+          {buildDatePresets(maxDateRaw).map(p => (
             <button
               key={p.value}
               onClick={() => setDatePreset(p.value)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-sfx-orange text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${datePreset === p.value ? 'bg-[var(--sfx-orange)] text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
             >
               {p.label}
             </button>
@@ -142,32 +173,43 @@ export default function RiderDeliveryPage() {
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+          <span className="text-[10px] text-slate-400 font-mono">{rawCities.length} cities · {hubs.length} hubs · {riders.length} riders</span>
+          <button
+            onClick={() => exportDeliveryCsv()}
+            className="btn-secondary !py-1 !px-2.5 !text-[10px] !gap-1"
+          >
+            <Download className="w-3 h-3" /> Export All
+          </button>
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="bg-slate-50 border-b border-slate-200">
-              <th className="text-left px-4 py-3 font-medium text-slate-600 w-44 cursor-pointer select-none" onClick={() => toggleSort('city')}>City / Hub / Rider<SortIcon col="city" /></th>
-              <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('orders3MR')}># Orders<SortIcon col="orders3MR" /></th>
-              <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('delivered3MR')}># Delivered<SortIcon col="delivered3MR" /></th>
-              <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('delPct')}>DEL%<SortIcon col="delPct" /></th>
-              <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('breachCount')}>Breaches<SortIcon col="breachCount" /></th>
-              <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleSort('breachPct')}>Breach%<SortIcon col="breachPct" /></th>
-              <th className="px-3 py-3 font-medium text-emerald-600 cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend7')}>L7D Trend<SortIcon col="trend7" /></th>
-              <th className="px-3 py-3 font-medium text-sfx-orange-dark cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend30')}>L30D Trend<SortIcon col="trend30" /></th>
-              <th className="px-3 py-3 font-medium text-slate-600">Behaviour</th>
-              <th className="px-3 py-3 font-medium text-slate-600">Regularity</th>
-            </tr></thead>
-            <tbody className="divide-y divide-slate-100">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th className="text-left w-44 cursor-pointer select-none" onClick={() => toggleSort('city')}>City / Hub / Rider<SortIcon col="city" /></th>
+                <th className="text-right cursor-pointer select-none" onClick={() => toggleSort('orders3MR')}># Orders<SortIcon col="orders3MR" /></th>
+                <th className="text-right cursor-pointer select-none" onClick={() => toggleSort('delivered3MR')}># Delivered<SortIcon col="delivered3MR" /></th>
+                <th className="text-right cursor-pointer select-none" onClick={() => toggleSort('delPct')}>DEL%<SortIcon col="delPct" /></th>
+                <th className="text-right cursor-pointer select-none" onClick={() => toggleSort('breachCount')}>Breaches<SortIcon col="breachCount" /></th>
+                <th className="text-right cursor-pointer select-none" onClick={() => toggleSort('breachPct')}>Breach%<SortIcon col="breachPct" /></th>
+                <th className="text-left cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend7')}>L7D Trend<SortIcon col="trend7" /></th>
+                <th className="text-left cursor-pointer select-none whitespace-nowrap" onClick={() => toggleSort('trend30')}>L30D Trend<SortIcon col="trend30" /></th>
+                <th className="text-left">Behaviour</th>
+                <th className="text-left">Regularity</th>
+              </tr>
+            </thead>
+            <tbody>
               {cities.map((city: any) => {
                 const cityHubs = hubs.filter((h: any) => h.city === city.city)
                 const cityExpanded = expandedCities.has(city.city)
                 return (<React.Fragment key={city.city}>
                   <tr className="bg-slate-50 hover:bg-slate-100/80 cursor-pointer font-medium transition-colors" onClick={() => toggleCity(city.city)}>
-                    <td className="px-4 py-3"><div className="flex items-center gap-2">{cityExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}<span>{city.city}</span></div></td>
+                    <td className="px-4 py-3"><div className="flex items-center gap-2">{cityExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}<span>{city.city}</span><button onClick={e => { e.stopPropagation(); exportDeliveryCsv(city.city) }} className="ml-1 text-slate-300 hover:text-slate-600 transition-colors" title={`Export ${city.city}`}><Download className="w-3 h-3" /></button></div></td>
                     <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(city.orders3MR)}</td>
                     <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(city.delivered3MR)}</td>
                     <td className="text-right px-3 py-3"><DelPctCell value={city.delPct} /></td>
-                    <td className="text-right px-3 py-3 font-mono text-red-600 font-medium">{formatNumber(city.breachCount)}</td>
+                    <td className="text-right px-3 py-3 font-mono text-red-600 font-semibold">{formatNumber(city.breachCount)}</td>
                     <td className="text-right px-3 py-3 font-mono text-red-500">{formatPct(city.breachPct)}</td>
                     <td className="px-3 py-3"><TrendDisplay delta={city.trend7?.delta ?? 0} /></td>
                     <td className="px-3 py-3"><TrendDisplay delta={city.trend30?.delta ?? 0} /></td>
@@ -204,7 +246,7 @@ export default function RiderDeliveryPage() {
                 </React.Fragment>)
               })}
               {/* Grand total */}
-              <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
+              <tr className="grand-total">
                 <td className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">Grand Total</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-slate-900">{formatNumber(gt.orders)}</td>
                 <td className="text-right px-3 py-3 font-mono font-bold text-slate-900">{formatNumber(gt.delivered)}</td>

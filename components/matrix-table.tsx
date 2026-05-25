@@ -1,17 +1,18 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { formatNumber } from '@/lib/utils'
 
 type MatrixCell = { evening: number; cross: number; morning: number; total: number }
 type Matrix = { Regular: MatrixCell; Irregular: MatrixCell; 'New Rider': MatrixCell }
 type MatrixData = { matrix: Matrix; total: number; cities: string[]; hubs: string[] }
+type MatrixView = 'riders' | 'orders'
 
 const ROWS: { key: keyof Matrix; label: string; color: string }[] = [
-  { key: 'Regular',    label: 'Regular',    color: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
-  { key: 'Irregular',  label: 'Irregular',  color: 'text-amber-600 bg-amber-50 border-amber-100' },
-  { key: 'New Rider',  label: 'New Rider',  color: 'text-sky-600 bg-sky-50 border-sky-100' },
+  { key: 'Regular',   label: 'Regular',   color: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
+  { key: 'Irregular', label: 'Irregular', color: 'text-amber-600 bg-amber-50 border-amber-100' },
+  { key: 'New Rider', label: 'New Rider', color: 'text-sky-600 bg-sky-50 border-sky-100' },
 ]
 const COLS = [
   { key: 'evening' as const, label: 'Evening',    color: 'text-indigo-600' },
@@ -23,10 +24,105 @@ function formatPct(value: number, total: number) {
   return total > 0 ? `${((value / total) * 100).toFixed(1)}%` : '0.0%'
 }
 
+const emptyMatrix: Matrix = {
+  Regular: { evening: 0, cross: 0, morning: 0, total: 0 },
+  Irregular: { evening: 0, cross: 0, morning: 0, total: 0 },
+  'New Rider': { evening: 0, cross: 0, morning: 0, total: 0 },
+}
+
+interface MatrixGridProps {
+  matrix: Matrix
+  total: number
+  loading: boolean
+  label: string
+  sublabel: string
+}
+
+function MatrixGrid({ matrix, total, loading, label, sublabel }: MatrixGridProps) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50/50">
+        <div className="text-xs font-semibold text-slate-700">{label}</div>
+        <div className="text-[10px] text-slate-400 mt-0.5">{sublabel}</div>
+      </div>
+      <div className="relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
+            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+          </div>
+        )}
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-100">
+              <th className="text-left px-3 py-2 font-medium text-slate-400 w-24 text-[10px]">Behaviour ↓</th>
+              {ROWS.map(r => (
+                <th key={r.key} className={`text-center px-3 py-2 font-semibold text-[10px] uppercase tracking-wide border-l border-slate-100 ${r.color.split(' ')[0]}`}>
+                  {r.label}
+                </th>
+              ))}
+              <th className="text-center px-3 py-2 font-medium text-slate-400 text-[10px] uppercase tracking-wide border-l border-slate-100">
+                Row %
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {COLS.map(col => {
+              const values = ROWS.map(row => matrix[row.key]?.[col.key] ?? 0)
+              const rowTotal = values.reduce((s, v) => s + v, 0)
+              return (
+                <tr key={col.key} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-3 py-2.5">
+                    <span className={`text-[11px] font-semibold uppercase tracking-wide ${col.color}`}>{col.label}</span>
+                  </td>
+                  {ROWS.map((row, i) => (
+                    <td key={row.key} className="px-2 py-2.5 text-center border-l border-slate-100">
+                      <div className={`font-mono font-semibold text-xs ${row.color.split(' ')[0]}`}>{formatPct(values[i], total)}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(values[i])}</div>
+                    </td>
+                  ))}
+                  <td className="px-2 py-2.5 text-center border-l border-slate-100">
+                    <div className={`font-mono font-bold text-xs ${col.color}`}>{formatPct(rowTotal, total)}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(rowTotal)}</div>
+                  </td>
+                </tr>
+              )
+            })}
+            <tr className="bg-slate-50 border-t-2 border-slate-200">
+              <td className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wide">Col Total</td>
+              {ROWS.map(row => {
+                const cell = matrix[row.key] ?? { evening: 0, cross: 0, morning: 0, total: 0 }
+                return (
+                  <td key={row.key} className="px-2 py-2 text-center border-l border-slate-100">
+                    <div className={`font-mono font-bold text-xs ${row.color.split(' ')[0]}`}>{formatPct(cell.total, total)}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(cell.total)}</div>
+                  </td>
+                )
+              })}
+              <td className="px-2 py-2 text-center border-l border-slate-100">
+                <div className="font-mono font-bold text-xs text-slate-900">100%</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(total)}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export function MatrixTable() {
+  // L30D state
   const [result, setResult] = useState<MatrixData | null>(null)
   const [volumeResult, setVolumeResult] = useState<MatrixData | null>(null)
-  const [loadingMatrix, setLoadingMatrix] = useState(true)
+  const [loading30, setLoading30] = useState(true)
+
+  // D-1 state
+  const [d1Result, setD1Result] = useState<MatrixData | null>(null)
+  const [d1VolumeResult, setD1VolumeResult] = useState<MatrixData | null>(null)
+  const [loadingD1, setLoadingD1] = useState(true)
+  const [d1DateLabel, setD1DateLabel] = useState('')
+
+  const [matrixView, setMatrixView] = useState<MatrixView>('riders')
   const [draftCity, setDraftCity] = useState('all')
   const [draftHub, setDraftHub] = useState('all')
   const [appliedCity, setAppliedCity] = useState('all')
@@ -35,25 +131,46 @@ export function MatrixTable() {
   const isDirty = draftCity !== appliedCity || draftHub !== appliedHub
   const isFiltered = appliedCity !== 'all' || appliedHub !== 'all'
 
-  const fetchMatrix = useCallback((city: string, hub: string) => {
-    setLoadingMatrix(true)
+  const fetchAll = useCallback((city: string, hub: string) => {
+    setLoading30(true)
+    setLoadingD1(true)
     const params = new URLSearchParams()
     if (city !== 'all') params.set('city', city)
     if (hub !== 'all') params.set('hub', hub)
+
+    const d1Params = new URLSearchParams(params)
+    d1Params.set('d1Only', 'true')
+
     Promise.all([
       fetch(`/api/profiling/matrix?${params}`).then(r => r.json()),
       fetch(`/api/profiling/volume-matrix?${params}`).then(r => r.json()),
-    ])
-      .then(([profileData, volumeData]) => {
-        setResult(profileData)
-        setVolumeResult(volumeData)
-        setLoadingMatrix(false)
-      })
-      .catch(() => setLoadingMatrix(false))
+    ]).then(([profileData, volumeData]) => {
+      setResult(profileData)
+      setVolumeResult(volumeData)
+      setLoading30(false)
+    }).catch(() => setLoading30(false))
+
+    Promise.all([
+      fetch(`/api/profiling/matrix?${d1Params}`).then(r => r.json()),
+      fetch(`/api/profiling/volume-matrix?${d1Params}`).then(r => r.json()),
+    ]).then(([profileData, volumeData]) => {
+      setD1Result(profileData)
+      setD1VolumeResult(volumeData)
+      setLoadingD1(false)
+    }).catch(() => setLoadingD1(false))
   }, [])
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { fetchMatrix('all', 'all') }, [fetchMatrix])
+  useEffect(() => { fetchAll('all', 'all') }, [fetchAll])
+
+  useEffect(() => {
+    fetch('/api/status').then(r => r.json()).then(d => {
+      if (d.maxDateRaw) {
+        const date = new Date(d.maxDateRaw)
+        const label = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+        setD1DateLabel(label)
+      }
+    }).catch(() => {})
+  }, [])
 
   function handleCityChange(city: string) {
     setDraftCity(city)
@@ -69,38 +186,53 @@ export function MatrixTable() {
   function handleApply() {
     setAppliedCity(draftCity)
     setAppliedHub(draftHub)
-    fetchMatrix(draftCity, draftHub)
+    fetchAll(draftCity, draftHub)
   }
 
   function handleClear() {
     setDraftCity('all'); setDraftHub('all')
     setAppliedCity('all'); setAppliedHub('all')
-    fetchMatrix('all', 'all')
+    fetchAll('all', 'all')
   }
 
-  const matrix: Matrix = result?.matrix ?? {
-    Regular: { evening: 0, cross: 0, morning: 0, total: 0 },
-    Irregular: { evening: 0, cross: 0, morning: 0, total: 0 },
-    'New Rider': { evening: 0, cross: 0, morning: 0, total: 0 },
-  }
-  const volumeMatrix: Matrix = volumeResult?.matrix ?? {
-    Regular: { evening: 0, cross: 0, morning: 0, total: 0 },
-    Irregular: { evening: 0, cross: 0, morning: 0, total: 0 },
-    'New Rider': { evening: 0, cross: 0, morning: 0, total: 0 },
-  }
-  const total = result?.total ?? 0
-  const volumeTotal = volumeResult?.total ?? 0
+  const l30dMatrix = matrixView === 'riders'
+    ? (result?.matrix ?? emptyMatrix)
+    : (volumeResult?.matrix ?? emptyMatrix)
+  const l30dTotal = matrixView === 'riders' ? (result?.total ?? 0) : (volumeResult?.total ?? 0)
+
+  const d1Matrix = matrixView === 'riders'
+    ? (d1Result?.matrix ?? emptyMatrix)
+    : (d1VolumeResult?.matrix ?? emptyMatrix)
+  const d1Total = matrixView === 'riders' ? (d1Result?.total ?? 0) : (d1VolumeResult?.total ?? 0)
+
   const cityOptions = result?.cities ?? []
   const hubOptions = result?.hubs ?? []
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <h2 className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Regularity × Behaviour Matrix</h2>
-            <p className="text-[10px] text-slate-400 mt-0.5">Last 30 days · Rider mix and orders attempted by segment</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">L30D classification · compared to D-1 active riders</p>
           </div>
+
+          <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg">
+            <button
+              onClick={() => setMatrixView('riders')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${matrixView === 'riders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Riders
+            </button>
+            <button
+              onClick={() => setMatrixView('orders')}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${matrixView === 'orders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Orders
+            </button>
+          </div>
+
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <select
               value={draftCity}
@@ -145,97 +277,24 @@ export function MatrixTable() {
         </div>
       </div>
 
-      <div className="overflow-x-auto relative">
-        {loadingMatrix && (
-          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10">
-            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-          </div>
-        )}
-        <table className="w-full min-w-[920px] text-xs">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-100">
-              <th rowSpan={2} className="text-left px-4 py-2.5 font-medium text-slate-500 w-36 align-middle">Behaviour ↓ / Regularity →</th>
-              {ROWS.map(r => (
-                <th key={r.key} colSpan={2} className={`text-center px-4 py-2.5 font-semibold uppercase tracking-wide border-l border-slate-100 ${r.color.split(' ')[0]}`}>{r.label}</th>
-              ))}
-              <th colSpan={2} className="text-center px-4 py-2.5 font-medium text-slate-500 uppercase tracking-wide border-l border-slate-100">Row Total</th>
-            </tr>
-            <tr className="bg-slate-50/80 border-b border-slate-100">
-              {ROWS.map(row => (
-                <Fragment key={row.key}>
-                  <th className="text-center px-3 py-2 font-medium text-slate-500 uppercase tracking-wide border-l border-slate-100">Riders</th>
-                  <th className="text-center px-3 py-2 font-medium text-slate-500 uppercase tracking-wide">Orders Attempted</th>
-                </Fragment>
-              ))}
-              <th className="text-center px-3 py-2 font-medium text-slate-500 uppercase tracking-wide border-l border-slate-100">Riders</th>
-              <th className="text-center px-3 py-2 font-medium text-slate-500 uppercase tracking-wide">Orders Attempted</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {COLS.map(col => {
-              const regValues = ROWS.map(row => (matrix[row.key]?.[col.key] ?? 0))
-              const volumeValues = ROWS.map(row => (volumeMatrix[row.key]?.[col.key] ?? 0))
-              const rowTotal = regValues.reduce((s, v) => s + v, 0)
-              const volumeRowTotal = volumeValues.reduce((s, v) => s + v, 0)
-              return (
-                <tr key={col.key} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-4 py-3">
-                    <span className={`text-[11px] font-semibold uppercase tracking-wide ${col.color}`}>
-                      {col.label}
-                    </span>
-                  </td>
-                  {ROWS.map((row, i) => (
-                    <Fragment key={row.key}>
-                      <td className="px-3 py-3 text-center border-l border-slate-100">
-                        <div className={`font-mono font-semibold text-sm ${row.color.split(' ')[0]}`}>{formatPct(regValues[i], total)}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(regValues[i])}</div>
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <div className={`font-mono font-semibold text-sm ${row.color.split(' ')[0]}`}>{formatPct(volumeValues[i], volumeTotal)}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(volumeValues[i])}</div>
-                      </td>
-                    </Fragment>
-                  ))}
-                  <td className="px-3 py-3 text-center border-l border-slate-100">
-                    <div className={`font-mono font-bold text-sm ${col.color}`}>{formatPct(rowTotal, total)}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(rowTotal)}</div>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    <div className={`font-mono font-bold text-sm ${col.color}`}>{formatPct(volumeRowTotal, volumeTotal)}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(volumeRowTotal)}</div>
-                  </td>
-                </tr>
-              )
-            })}
-            <tr className="bg-slate-50 border-t-2 border-slate-200">
-              <td className="px-4 py-2.5 text-xs font-bold text-slate-600 uppercase tracking-wide">Col Total</td>
-              {ROWS.map(row => {
-                const cell = matrix[row.key] ?? { evening: 0, cross: 0, morning: 0, total: 0 }
-                const volumeCell = volumeMatrix[row.key] ?? { evening: 0, cross: 0, morning: 0, total: 0 }
-                return (
-                  <Fragment key={row.key}>
-                    <td className="px-3 py-2.5 text-center border-l border-slate-100">
-                      <div className={`font-mono font-bold text-sm ${row.color.split(' ')[0]}`}>{formatPct(cell.total, total)}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(cell.total)}</div>
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <div className={`font-mono font-bold text-sm ${row.color.split(' ')[0]}`}>{formatPct(volumeCell.total, volumeTotal)}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(volumeCell.total)}</div>
-                    </td>
-                  </Fragment>
-                )
-              })}
-              <td className="px-3 py-2.5 text-center border-l border-slate-100">
-                <div className="font-mono font-bold text-sm text-slate-900">100%</div>
-                <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(total)}</div>
-              </td>
-              <td className="px-3 py-2.5 text-center">
-                <div className="font-mono font-bold text-sm text-slate-900">100%</div>
-                <div className="text-[10px] text-slate-400 mt-0.5 font-mono">{formatNumber(volumeTotal)}</div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      {/* Two matrices side by side */}
+      <div className="overflow-x-auto">
+        <div className="flex min-w-[900px] divide-x divide-slate-200">
+          <MatrixGrid
+            matrix={l30dMatrix}
+            total={l30dTotal}
+            loading={loading30}
+            label="L30D — All Riders"
+            sublabel="30-day rolling classification"
+          />
+          <MatrixGrid
+            matrix={d1Matrix}
+            total={d1Total}
+            loading={loadingD1}
+            label={`D-1 — Logged In${d1DateLabel ? ` (${d1DateLabel})` : ''}`}
+            sublabel="All riders who logged in · L30D profile classification"
+          />
+        </div>
       </div>
     </div>
   )

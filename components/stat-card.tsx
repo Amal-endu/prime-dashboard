@@ -8,37 +8,36 @@ interface StatCardProps {
   className?: string
 }
 
-const accentBar = {
-  default: 'bg-slate-300',
-  green: 'bg-emerald-500',
-  amber: 'bg-amber-400',
-  red: 'bg-red-500',
-  sky: 'bg-sky-500',
-  purple: 'bg-purple-500',
-  orange: 'bg-sfx-orange',
-}
-
-const valueClasses = {
-  default: 'text-slate-900',
-  green: 'text-emerald-700',
-  amber: 'text-amber-700',
-  red: 'text-red-700',
-  sky: 'text-sky-700',
-  purple: 'text-purple-700',
-  orange: 'text-sfx-orange-dark',
+const accentColors = {
+  default: { bar: 'bg-slate-300', value: 'text-slate-900', icon: 'bg-slate-100' },
+  green: { bar: 'bg-emerald-500', value: 'text-emerald-700', icon: 'bg-emerald-50' },
+  amber: { bar: 'bg-amber-400', value: 'text-amber-700', icon: 'bg-amber-50' },
+  red: { bar: 'bg-red-500', value: 'text-red-700', icon: 'bg-red-50' },
+  sky: { bar: 'bg-sky-500', value: 'text-sky-700', icon: 'bg-sky-50' },
+  purple: { bar: 'bg-purple-500', value: 'text-purple-700', icon: 'bg-purple-50' },
+  orange: { bar: 'bg-[var(--sfx-orange)]', value: 'text-[var(--sfx-orange-d)]', icon: 'bg-orange-50' },
 }
 
 export function StatCard({ label, value, sub, accent = 'default', className }: StatCardProps) {
+  const colors = accentColors[accent]
+
   return (
-    <div className={cn(
-      'rounded-xl border border-slate-200 bg-white overflow-hidden min-w-0 relative',
-      className,
-    )}>
-      <div className={cn('h-0.5 w-full', accentBar[accent])} />
-      <div className="p-4">
-        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider truncate">{label}</p>
-        <p className={cn('text-2xl font-bold mt-1 tabular-nums font-mono', valueClasses[accent])}>{value}</p>
-        {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
+    <div className={cn('kpi-card min-w-0', className)}>
+      {/* Left accent bar */}
+      <div className={cn('accent-bar', colors.bar)} />
+      <div className="pl-4 pr-3 py-3">
+        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate leading-tight">
+          {label}
+        </p>
+        <p className={cn(
+          'text-xl font-bold mt-1.5 tabular-nums font-mono leading-none animate-count-up',
+          colors.value,
+        )}>
+          {value}
+        </p>
+        {sub && (
+          <p className="text-[11px] text-slate-400 mt-1 truncate">{sub}</p>
+        )}
       </div>
     </div>
   )

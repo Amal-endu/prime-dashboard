@@ -5,6 +5,7 @@ import { ChevronRight, ChevronDown, SlidersHorizontal, Star, Loader2, Search } f
 import { StatCard } from '@/components/stat-card'
 import { TrendDisplay } from '@/components/trend-display'
 import { DelPctCell } from '@/components/del-pct-cell'
+import { DemandTrendCharts } from '@/components/demand-trend-charts'
 import { formatNumber, formatPct } from '@/lib/utils'
 import { LineChart, Line, ResponsiveContainer, Tooltip } from 'recharts'
 import type { TrendDirection } from '@/lib/types'
@@ -26,6 +27,7 @@ export default function DemandPage() {
   const [expandedCities, setExpandedCities] = useState<Set<string>>(new Set())
   const [primeOnly, setPrimeOnly] = useState(false)
   const [clientSearch, setClientSearch] = useState('')
+  const [clientFilter, setClientFilter] = useState('all')
 
   // Separate sort state for each view
   const [citySortCol, setCitySortCol] = useState<CitySortCol>('demand3MR')
@@ -38,12 +40,13 @@ export default function DemandPage() {
     toast.register()
     const params = new URLSearchParams({ view: subView })
     if (primeOnly) params.set('prime', 'true')
+    if (clientFilter !== 'all') params.set('client', clientFilter)
     Object.entries(toApiParams(config)).forEach(([k, v]) => params.set(k, v))
     fetch(`/api/demand?${params}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); toast.completeOne() })
       .catch(() => { setLoading(false); toast.failAll() })
-  }, [subView, primeOnly, configVersion])
+  }, [subView, primeOnly, clientFilter, configVersion])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
 
@@ -59,6 +62,7 @@ export default function DemandPage() {
 
   const rawCities: any[] = data?.cities ?? []
   const rawClients: any[] = data?.clients ?? []
+  const clientList: string[] = data?.clientList ?? []
 
   const cities = [...rawCities].sort((a, b) => {
     const v = citySortCol === 'city'
@@ -118,63 +122,80 @@ export default function DemandPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 animate-fade-in">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Demand Data</h1>
-          <p className="text-sm text-slate-500 mt-0.5">City and client level demand with trend indicators · {data?.date}</p>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight">Allocation</h1>
+          <p className="text-[13px] text-slate-500 mt-0.5">8-day allocation trend · city and client breakdown · {data?.date}</p>
         </div>
-        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg shrink-0">
-          <button onClick={() => setSubView('city')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${subView === 'city' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>City Level</button>
-          <button onClick={() => setSubView('client')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${subView === 'client' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Client Level</button>
+        <div className="flex gap-0.5 bg-slate-100 p-0.5 rounded-lg shrink-0">
+          <button onClick={() => setSubView('city')} className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${subView === 'city' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>City Level</button>
+          <button onClick={() => setSubView('client')} className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200 ${subView === 'client' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Client Level</button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Total Demand" value={formatNumber(totalDemand)} />
-        <StatCard label="3MR Demand" value={formatNumber(total3MR)} accent="orange" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 stagger-children">
+        <StatCard label="Total Allocation" value={formatNumber(totalDemand)} />
+        <StatCard label="3MR Allocation" value={formatNumber(total3MR)} accent="orange" />
         <StatCard label="Avg 3MR DEL%" value={formatPct(avgDel)} accent={avgDel >= 80 ? 'green' : avgDel >= 60 ? 'amber' : 'red'} />
         <StatCard label={subView === 'city' ? 'Cities Trending ▲' : 'Clients Trending ▲'} value={`${uptickCount} / ${uptickTotal}`} accent="green" />
       </div>
+
+      <DemandTrendCharts mr3CutoffHour={config.mr3CutoffHour} clientFilter={clientFilter} primeOnly={primeOnly} />
 
       {loading && <div className="flex items-center gap-2 text-slate-500 py-8 justify-center"><Loader2 className="w-5 h-5 animate-spin" />Loading...</div>}
 
       {!loading && subView === 'city' && (
         <>
-          <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+          <div className="filter-bar">
             <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
+            <select
+              value={clientFilter}
+              onChange={e => setClientFilter(e.target.value)}
+              className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow"
+            >
+              <option value="all">All Clients</option>
+              {clientList.map((c: string) => <option key={c} value={c}>{c}</option>)}
+            </select>
             <button
               onClick={() => setPrimeOnly(p => !p)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${primeOnly ? 'bg-sfx-orange text-white border-sfx-orange' : 'bg-white text-slate-600 border-slate-200 hover:border-sfx-orange-light'}`}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all duration-200 flex items-center gap-1.5 ${primeOnly ? 'bg-[var(--sfx-orange)] text-white border-[var(--sfx-orange)] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-[var(--sfx-orange-l)]'}`}
             >
               <Star className="w-3 h-3" />C2 Clients
             </button>
+            {(primeOnly || clientFilter !== 'all') && (
+              <div className="flex items-center gap-2">
+                {primeOnly && <span className="filter-chip">C2 Clients Only<button onClick={() => setPrimeOnly(false)}>×</button></span>}
+                {clientFilter !== 'all' && <span className="filter-chip">{clientFilter}<button onClick={() => setClientFilter('all')}>×</button></span>}
+                <button onClick={() => { setPrimeOnly(false); setClientFilter('all') }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
+              </div>
+            )}
           </div>
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 w-52 cursor-pointer select-none" onClick={() => toggleCitySort('city')}>City / Hub<CitySortIcon col="city" /></th>
-                  <th className="text-left px-3 py-3 font-medium text-slate-600">Zone</th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleCitySort('totalDemand')}>Total Demand<CitySortIcon col="totalDemand" /></th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleCitySort('demand3MR')}>3MR Demand<CitySortIcon col="demand3MR" /></th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleCitySort('delPct3MR')}>3MR DEL%<CitySortIcon col="delPct3MR" /></th>
-                  <th className="px-3 py-3 font-medium text-slate-600">vs D-1</th>
-                  <th className="px-4 py-3 font-medium text-slate-600">7-Day Trend</th>
-                </tr></thead>
-                <tbody className="divide-y divide-slate-100">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th className="text-left w-52 cursor-pointer select-none" onClick={() => toggleCitySort('city')}>City / Hub<CitySortIcon col="city" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleCitySort('totalDemand')}>Total Allocation<CitySortIcon col="totalDemand" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleCitySort('demand3MR')}>3MR Allocation<CitySortIcon col="demand3MR" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleCitySort('delPct3MR')}>3MR DEL%<CitySortIcon col="delPct3MR" /></th>
+                    <th className="text-left">D-1 Δ</th>
+                    <th className="text-left">7-Day Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {cities.map((city: any) => (
                     <React.Fragment key={city.city}>
                       <tr className="bg-slate-50 hover:bg-slate-100/80 cursor-pointer font-medium transition-colors" onClick={() => city.hubs?.length > 0 && toggleCity(city.city)}>
                         <td className="px-4 py-3"><div className="flex items-center gap-2">{city.hubs?.length > 0 ? (expandedCities.has(city.city) ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />) : <span className="w-4" />}<span>{city.city}</span></div></td>
-                        <td className="px-3 py-3 text-slate-500 text-xs">{city.zone}</td>
-                        <td className="text-right px-3 py-3 text-slate-700">{formatNumber(city.totalDemand)}</td>
-                        <td className="text-right px-3 py-3 text-sfx-orange-dark font-semibold">{formatNumber(city.demand3MR)}</td>
+                        <td className="text-right px-3 py-3 text-slate-700 font-mono">{formatNumber(city.totalDemand)}</td>
+                        <td className="text-right px-3 py-3 text-sfx-orange-dark font-semibold font-mono">{formatNumber(city.demand3MR)}</td>
                         <td className="text-right px-3 py-3"><DelPctCell value={city.delPct3MR} /></td>
                         <td className="px-3 py-3"><TrendDisplay direction={city.trendDirection as TrendDirection} pct={city.trendPct} /></td>
                         <td className="px-4 py-3 w-28">
                           {city.sparkline?.length > 0 && <ResponsiveContainer width="100%" height={32}>
                             <LineChart data={city.sparkline}>
-                              <Line type="monotone" dataKey="value" stroke="#FF6200" strokeWidth={1.5} dot={false} />
+                              <Line type="monotone" dataKey="value" stroke="var(--sfx-orange)" strokeWidth={1.5} dot={false} />
                               <Tooltip contentStyle={{ fontSize: 10, padding: '2px 6px', borderRadius: 4 }} formatter={(v) => [formatNumber(Number(v)), '3MR']} />
                             </LineChart>
                           </ResponsiveContainer>}
@@ -183,9 +204,8 @@ export default function DemandPage() {
                       {expandedCities.has(city.city) && city.hubs?.map((hub: any) => (
                         <tr key={hub.hub} className="bg-white hover:bg-sfx-orange/5 transition-colors">
                           <td className="px-4 py-2.5 pl-10"><div className="flex items-center gap-2"><span className="w-3.5" /><span className="text-slate-700 font-medium">{hub.hub}</span></div></td>
-                          <td className="px-3 py-2.5 text-slate-400 text-xs">—</td>
-                          <td className="text-right px-3 py-2.5 text-slate-600">{formatNumber(hub.totalDemand ?? hub.demand3MR)}</td>
-                          <td className="text-right px-3 py-2.5 text-sfx-orange">{formatNumber(hub.demand3MR)}</td>
+                          <td className="text-right px-3 py-2.5 text-slate-600 font-mono">{formatNumber(hub.totalDemand ?? hub.demand3MR)}</td>
+                          <td className="text-right px-3 py-2.5 text-sfx-orange font-mono">{formatNumber(hub.demand3MR)}</td>
                           <td className="text-right px-3 py-2.5"><DelPctCell value={hub.delPct3MR} /></td>
                           <td className="px-3 py-2.5"><TrendDisplay direction={hub.trendDirection as TrendDirection} pct={hub.trendPct} /></td>
                           <td className="px-4 py-2.5 text-slate-300 text-xs">—</td>
@@ -194,9 +214,8 @@ export default function DemandPage() {
                     </React.Fragment>
                   ))}
                   {/* City grand total */}
-                  <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
+                  <tr className="grand-total">
                     <td className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">Grand Total</td>
-                    <td className="px-3 py-3 text-slate-400 text-xs">—</td>
                     <td className="text-right px-3 py-3 font-mono font-bold text-slate-900">{formatNumber(cityGT.totalDemand)}</td>
                     <td className="text-right px-3 py-3 font-mono font-bold text-sfx-orange-dark">{formatNumber(cityGT.demand3MR)}</td>
                     <td className="text-right px-3 py-3"><DelPctCell value={cityGTDelPct} /></td>
@@ -211,7 +230,7 @@ export default function DemandPage() {
 
       {!loading && subView === 'client' && (
         <>
-          <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+          <div className="filter-bar">
             <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -219,48 +238,64 @@ export default function DemandPage() {
                 value={clientSearch}
                 onChange={e => setClientSearch(e.target.value)}
                 placeholder="Search client..."
-                className="pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light w-48"
+                className="pl-8 pr-3 py-1.5 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] w-48 transition-shadow"
               />
             </div>
+            <select
+              value={clientFilter}
+              onChange={e => setClientFilter(e.target.value)}
+              className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow"
+            >
+              <option value="all">All Clients</option>
+              {clientList.map((c: string) => <option key={c} value={c}>{c}</option>)}
+            </select>
             <button
               onClick={() => setPrimeOnly(p => !p)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${primeOnly ? 'bg-sfx-orange text-white border-sfx-orange' : 'bg-white text-slate-600 border-slate-200 hover:border-sfx-orange-light'}`}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all duration-200 flex items-center gap-1.5 ${primeOnly ? 'bg-[var(--sfx-orange)] text-white border-[var(--sfx-orange)] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-[var(--sfx-orange-l)]'}`}
             >
               <Star className="w-3 h-3" />C2 Clients
             </button>
+            {(clientSearch || primeOnly || clientFilter !== 'all') && (
+              <div className="flex items-center gap-2">
+                {clientSearch && <span className="filter-chip">&quot;{clientSearch}&quot;<button onClick={() => setClientSearch('')}>×</button></span>}
+                {primeOnly && <span className="filter-chip">C2 Clients Only<button onClick={() => setPrimeOnly(false)}>×</button></span>}
+                {clientFilter !== 'all' && <span className="filter-chip">{clientFilter}<button onClick={() => setClientFilter('all')}>×</button></span>}
+                <button onClick={() => { setClientSearch(''); setPrimeOnly(false); setClientFilter('all') }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
+              </div>
+            )}
             {clientSearch && (
               <p className="text-xs text-slate-400 font-mono ml-auto">{clients.length} of {rawClients.length} clients</p>
             )}
           </div>
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="card overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleClientSort('clientName')}>Client<ClientSortIcon col="clientName" /></th>
-                  <th className="px-3 py-3 font-medium text-slate-600">C2</th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleClientSort('totalAWBs')}>Total AWBs<ClientSortIcon col="totalAWBs" /></th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleClientSort('awbs3MR')}>3MR AWBs<ClientSortIcon col="awbs3MR" /></th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleClientSort('delivered')}>Delivered<ClientSortIcon col="delivered" /></th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-600 cursor-pointer select-none" onClick={() => toggleClientSort('delPct')}>DEL%<ClientSortIcon col="delPct" /></th>
-                  <th className="px-3 py-3 font-medium text-slate-600">vs D-1</th>
-                  <th className="text-right px-3 py-3 font-medium text-slate-500 whitespace-nowrap">Avg L7D</th>
-                  <th className="px-4 py-3 font-medium text-slate-600">7-Day Trend</th>
-                </tr></thead>
-                <tbody className="divide-y divide-slate-100">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th className="text-left cursor-pointer select-none" onClick={() => toggleClientSort('clientName')}>Client<ClientSortIcon col="clientName" /></th>
+                    <th className="text-left w-16">C2</th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleClientSort('totalAWBs')}>Total AWBs<ClientSortIcon col="totalAWBs" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleClientSort('awbs3MR')}>3MR AWBs<ClientSortIcon col="awbs3MR" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleClientSort('delivered')}>Delivered<ClientSortIcon col="delivered" /></th>
+                    <th className="text-right cursor-pointer select-none" onClick={() => toggleClientSort('delPct')}>DEL%<ClientSortIcon col="delPct" /></th>
+                    <th className="text-left">D-1 Δ</th>
+                    <th className="text-left">7-Day Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {clients.map((client: any) => (
                     <tr key={client.clientName} className="hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-slate-800">{client.clientName}</td>
-                      <td className="px-3 py-3">{client.isPrime ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"><Star className="w-3 h-3" />C2</span> : <span className="text-slate-400 text-xs">—</span>}</td>
-                      <td className="text-right px-3 py-3 tabular-nums text-slate-700">{formatNumber(client.totalAWBs)}</td>
-                      <td className="text-right px-3 py-3 tabular-nums text-sfx-orange-dark">{formatNumber(client.awbs3MR)}</td>
-                      <td className="text-right px-3 py-3 tabular-nums text-slate-700">{formatNumber(client.delivered)}</td>
+                      <td className="px-3 py-3">{client.isPrime ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200"><Star className="w-3 h-3 text-amber-500 fill-amber-500" />C2</span> : <span className="text-slate-400 text-xs">—</span>}</td>
+                      <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(client.totalAWBs)}</td>
+                      <td className="text-right px-3 py-3 font-mono text-sfx-orange-dark font-semibold">{formatNumber(client.awbs3MR)}</td>
+                      <td className="text-right px-3 py-3 font-mono text-slate-700">{formatNumber(client.delivered)}</td>
                       <td className="text-right px-3 py-3"><DelPctCell value={client.delPct} /></td>
                       <td className="px-3 py-3"><TrendDisplay direction={client.trendDirection as TrendDirection} pct={client.trendPct} /></td>
-                      <td className="text-right px-3 py-3 font-mono text-slate-500 text-xs">{formatNumber(client.avgL7d)}</td>
                       <td className="px-4 py-3 w-28">
                         {client.sparkline?.length > 0 && <ResponsiveContainer width="100%" height={32}>
                           <LineChart data={client.sparkline}>
-                            <Line type="monotone" dataKey="value" stroke="#FF6200" strokeWidth={1.5} dot={false} />
+                            <Line type="monotone" dataKey="value" stroke="var(--sfx-orange)" strokeWidth={1.5} dot={false} />
                             <Tooltip contentStyle={{ fontSize: 10, padding: '2px 6px', borderRadius: 4 }} formatter={(v) => [formatNumber(Number(v)), '3MR']} />
                           </LineChart>
                         </ResponsiveContainer>}
@@ -268,7 +303,7 @@ export default function DemandPage() {
                     </tr>
                   ))}
                   {/* Client grand total */}
-                  <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
+                  <tr className="grand-total">
                     <td className="px-4 py-3 text-xs font-bold text-slate-700 uppercase tracking-wide">
                       Grand Total {clientSearch && <span className="font-normal text-slate-500 normal-case">(filtered)</span>}
                     </td>
@@ -277,7 +312,7 @@ export default function DemandPage() {
                     <td className="text-right px-3 py-3 font-mono font-bold text-sfx-orange-dark">{formatNumber(clientGT.awbs3MR)}</td>
                     <td className="text-right px-3 py-3 font-mono font-bold text-slate-900">{formatNumber(clientGT.delivered)}</td>
                     <td className="text-right px-3 py-3"><DelPctCell value={clientGTDelPct} /></td>
-                    <td colSpan={3} className="px-3 py-3 text-slate-400 text-xs">—</td>
+                    <td colSpan={2} className="px-3 py-3 text-slate-400 text-xs">—</td>
                   </tr>
                 </tbody>
               </table>
