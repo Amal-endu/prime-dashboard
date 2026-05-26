@@ -18,6 +18,13 @@ interface RiderStats {
   favouriteClusterEvening: string | null
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+function fmtCalDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return '—'
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+}
 interface RiderProfileCardProps {
   rider: {
     riderId: number
@@ -30,6 +37,8 @@ interface RiderProfileCardProps {
     morningLogins: number
     eveningLogins: number
     firstLoginDate: string
+    lastLoginDate: string
+    daysSinceLastLogin: number
     activeSinceDays: number
   }
 }
@@ -69,25 +78,25 @@ export function RiderProfileCard({ rider }: RiderProfileCardProps) {
 
   return (
     <tr>
-      <td colSpan={12} className="px-0 py-0 border-b border-slate-100">
+      <td colSpan={11} className="px-0 py-0 border-b border-slate-100">
         <div className="bg-slate-50/80 border-y border-slate-200 px-16 py-4">
           <div className="grid grid-cols-4 gap-6">
 
             {/* Identity */}
             <div>
-              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-2">Identity</p>
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2">Identity</p>
               <div className="space-y-1.5">
                 <Row label="Rider ID" value={String(rider.riderId)} mono />
                 <Row label="Hub" value={rider.hub} />
                 <Row label="City" value={rider.city} />
-                <Row label="First Login" value={rider.firstLoginDate || '—'} mono />
-                <Row label="Active Since" value={`${rider.activeSinceDays}d ago`} mono />
+                <Row label="First Login" value={fmtCalDate(rider.firstLoginDate) || '—'} mono />
+                <Row label="Last Login" value={fmtCalDate(rider.lastLoginDate) || '—'} mono valueClass={rider.daysSinceLastLogin <= 7 ? 'text-emerald-600' : rider.daysSinceLastLogin <= 14 ? 'text-amber-600' : 'text-red-500'} />
               </div>
             </div>
 
             {/* Login Activity */}
             <div>
-              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-2">Login Activity (Last {windowDays}d)</p>
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2">Login Activity (Last {windowDays}d)</p>
               <div className="space-y-1.5">
                 <Row label="Days Logged In" value={`${loginDays} / ${windowDays}`} mono />
                 <div className="flex justify-between text-xs">
@@ -111,7 +120,7 @@ export function RiderProfileCard({ rider }: RiderProfileCardProps) {
 
             {/* Productivity & Earnings */}
             <div>
-              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-2">Productivity & Earnings</p>
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2">Productivity & Earnings</p>
               {stats == null ? (
                 <p className="text-[10px] text-slate-400 italic">Loading…</p>
               ) : (
@@ -136,7 +145,7 @@ export function RiderProfileCard({ rider }: RiderProfileCardProps) {
 
             {/* Classification */}
             <div>
-              <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-2">Classification</p>
+              <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2">Classification</p>
               <div className="space-y-2">
                 <div>
                   <p className="text-[10px] text-slate-400 mb-1">Login Behaviour</p>

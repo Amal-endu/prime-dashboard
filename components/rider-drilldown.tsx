@@ -97,23 +97,23 @@ export function RiderDrilldown({ rider, dateRange, onClose, colSpan }: RiderDril
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-white border-b border-sfx-orange-light/30">
-                        <th className="text-left px-3 py-2 font-medium text-slate-500">Date</th>
-                        <th className="text-right px-3 py-2 font-medium text-orange-500">Morning Run</th>
-                        <th className="text-right px-3 py-2 font-medium text-indigo-500">Evening Run</th>
-                        <th className="text-right px-3 py-2 font-medium text-slate-500">Total Attempts</th>
-                        <th className="text-right px-3 py-2 font-medium text-slate-500">Assigned 3MR</th>
-                        <th className="text-right px-3 py-2 font-medium text-slate-500">Avg Attempts</th>
-                        <th className="text-right px-3 py-2 font-medium text-slate-500">Avg Delivered</th>
-                        <th className="text-right px-3 py-2 font-medium text-amber-600">Attempt %</th>
-                        <th className="text-right px-3 py-2 font-medium text-emerald-600">Del %</th>
-                        <th className="text-right px-3 py-2 font-medium text-slate-500">Earnings</th>
+                        <th className="text-left px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Date</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-orange-500 uppercase tracking-wide">Morning Run</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-indigo-500 uppercase tracking-wide">Evening Run</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total Attempts</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Assigned 3MR</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Attempted</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Delivered</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-amber-600 uppercase tracking-wide">Attempt %</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-emerald-600 uppercase tracking-wide">Del %</th>
+                        <th className="text-right px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wide">Earnings</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-sfx-orange-light/20">
                       {days.map(d => (
                         <tr key={d.date} className="hover:bg-white/60">
-                          <td className="px-3 py-2 font-mono text-slate-700">{d.date}</td>
-                          <td className="text-right px-3 py-2 font-mono text-orange-600">
+                          <td className="px-3 py-2 font-mono text-sm text-slate-700">{d.date}</td>
+                          <td className="text-right px-3 py-2 font-mono text-sm text-orange-600">
                             {d.morningRunsheetHour != null ? `${String(d.morningRunsheetHour).padStart(2, '0')}:00` : <span className="text-slate-300">—</span>}
                           </td>
                           <td className="text-right px-3 py-2 font-mono text-indigo-600">

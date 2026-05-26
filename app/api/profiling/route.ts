@@ -5,6 +5,7 @@ import { query } from '@/lib/supabase/sql'
 import {
   apiError,
   parseBehaviour,
+  parseParamString,
   parseRegularity,
   parseThreshold,
   parseWindowDays,
@@ -15,6 +16,8 @@ export async function GET(request: Request) {
   try {
     const behaviour = parseBehaviour(searchParams.get('behaviour'))
     const regularity = parseRegularity(searchParams.get('regularity'))
+    const city = parseParamString(searchParams.get('city'), 'city')
+    const hub  = parseParamString(searchParams.get('hub'),  'hub')
 
     const includeRiders = searchParams.get('riders') === '1'
 
@@ -25,15 +28,28 @@ export async function GET(request: Request) {
     const regularThreshold = parseThreshold(searchParams.get('regularThreshold'),   80)
     const cfgParams: unknown[] = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
 
-    const behaviourParam = behaviour ? behaviour : null
-    const regularityParam = regularity ? regularity : null
+    const behaviourParam  = behaviour  ?? null
+    const regularityParam = regularity ?? null
+    const cityParam       = city       ?? null
+    const hubParam        = hub        ?? null
 
-    // $6 = behaviour filter (null = no filter), $7 = regularity filter (null = no filter)
+    // $6 = behaviour, $7 = regularity, $8 = city, $9 = hub (null = no filter)
+    // filterClause: used in rider_summary context (no table alias needed)
     const filterClause = `
       AND ($6::TEXT IS NULL OR login_behaviour_tag = $6)
       AND ($7::TEXT IS NULL OR regularity_tag = $7)
+      AND ($8::TEXT IS NULL OR COALESCE(city, 'Unmapped') = $8)
+      AND ($9::TEXT IS NULL OR hub = $9)
     `
-    const filterParams: unknown[] = [behaviourParam, regularityParam]
+    // joinedFilterClause: used in ON clauses joining rider_summary rs against city/hub metrics
+    // — must qualify city/hub with rs. to avoid ambiguity
+    const joinedFilterClause = `
+      AND ($6::TEXT IS NULL OR rs.login_behaviour_tag = $6)
+      AND ($7::TEXT IS NULL OR rs.regularity_tag = $7)
+      AND ($8::TEXT IS NULL OR COALESCE(rs.city, 'Unmapped') = $8)
+      AND ($9::TEXT IS NULL OR rs.hub = $9)
+    `
+    const filterParams: unknown[] = [behaviourParam, regularityParam, cityParam, hubParam]
 
     const classifyCte = `
 cfg AS (
@@ -72,17 +88,19 @@ agg AS (
   FROM rider_window
   GROUP BY rider_id
 ),
-global_first AS (
-  SELECT rider_id, MIN(date) AS first_ever_login
+global_dates AS (
+  SELECT rider_id, MIN(date) AS first_ever_login, MAX(date) AS last_ever_login
   FROM rider_daily
   GROUP BY rider_id
 ),
 classified AS (
   SELECT
     a.*,
-    gf.first_ever_login,
+    gd.first_ever_login,
+    gd.last_ever_login,
     (SELECT anchor_date FROM anchor) AS max_date,
-    ((SELECT anchor_date FROM anchor) - gf.first_ever_login) AS active_since_days,
+    ((SELECT anchor_date FROM anchor) - gd.first_ever_login) AS active_since_days,
+    ((SELECT anchor_date FROM anchor) - gd.last_ever_login)  AS days_since_last_login,
     CASE
       WHEN morning_login_days = 0 AND evening_login_rate_pct >= (SELECT evening_threshold FROM cfg)
         THEN 'Evening Rider'
@@ -91,14 +109,14 @@ classified AS (
       ELSE 'Morning Rider'
     END AS login_behaviour_tag,
     CASE
-      WHEN ((SELECT anchor_date FROM anchor) - gf.first_ever_login) <= (SELECT new_rider_days FROM cfg)
+      WHEN ((SELECT anchor_date FROM anchor) - gd.first_ever_login) <= (SELECT new_rider_days FROM cfg)
         THEN 'New Rider'
       WHEN login_rate_pct >= (SELECT regular_threshold FROM cfg)
         THEN 'Regular'
       ELSE 'Irregular'
     END AS regularity_tag
   FROM agg a
-  JOIN global_first gf USING (rider_id)
+  JOIN global_dates gd USING (rider_id)
 ),
 rider_summary AS (
   SELECT c.*, hm.city, hm.zone, hm.pod_name
@@ -187,7 +205,7 @@ hub_metrics AS (
         COUNT(DISTINCT rs.rider_id) AS total_unique_riders
       FROM city_metrics cm
       LEFT JOIN rider_summary rs ON COALESCE(rs.city, 'Unmapped') = cm.city
-        ${filterClause.replace(/login_behaviour_tag/g, 'rs.login_behaviour_tag').replace(/regularity_tag/g, 'rs.regularity_tag')}
+        ${joinedFilterClause}
       GROUP BY cm.city, cm.avg_daily_riders, cm.avg_morning, cm.avg_evening, cm.avg_cross,
                cm.avg_morning_login_hr, cm.avg_morning_atp, cm.avg_evening_login_hr, cm.avg_evening_atp
       ORDER BY cm.avg_daily_riders DESC`,
@@ -205,7 +223,7 @@ hub_metrics AS (
         COUNT(DISTINCT rs.rider_id) AS total_unique_riders
       FROM hub_metrics hm2
       LEFT JOIN rider_summary rs ON LOWER(rs.hub) = LOWER(hm2.hub)
-        ${filterClause.replace(/login_behaviour_tag/g, 'rs.login_behaviour_tag').replace(/regularity_tag/g, 'rs.regularity_tag')}
+        ${joinedFilterClause}
       GROUP BY hm2.hub, hm2.city, hm2.avg_daily_riders, hm2.avg_morning, hm2.avg_evening, hm2.avg_cross,
                hm2.avg_morning_login_hr, hm2.avg_morning_atp, hm2.avg_evening_login_hr, hm2.avg_evening_atp
       ORDER BY hm2.city, hm2.avg_daily_riders DESC`,
@@ -243,6 +261,8 @@ hub_metrics AS (
         rs.morning_login_days         AS morning_logins,
         rs.evening_login_days         AS evening_logins,
         rs.first_ever_login::TEXT     AS first_login_date,
+        rs.last_ever_login::TEXT      AS last_login_date,
+        rs.days_since_last_login,
         rs.active_since_days,
         ra.avg_morning_atp, ra.avg_morning_login_hr,
         ra.avg_evening_atp, ra.avg_evening_login_hr
@@ -250,6 +270,8 @@ hub_metrics AS (
       LEFT JOIN rider_atp ra ON rs.rider_id = ra.rider_id
       WHERE ($6::TEXT IS NULL OR rs.login_behaviour_tag = $6)
         AND ($7::TEXT IS NULL OR rs.regularity_tag = $7)
+        AND ($8::TEXT IS NULL OR COALESCE(rs.city, 'Unmapped') = $8)
+        AND ($9::TEXT IS NULL OR rs.hub = $9)
       ORDER BY city NULLS LAST, hub, rs.rider_id`,
       [...cfgParams, ...filterParams],
     ) : []
@@ -354,6 +376,8 @@ hub_metrics AS (
         morningLogins: Number(r.morning_logins),
         eveningLogins: Number(r.evening_logins),
         firstLoginDate: (r.first_login_date as string | null)?.slice(0, 10) ?? '',
+        lastLoginDate: (r.last_login_date as string | null)?.slice(0, 10) ?? '',
+        daysSinceLastLogin: Number(r.days_since_last_login),
         activeSinceDays: Number(r.active_since_days),
         avgMorningLoginHr: r.avg_morning_login_hr != null ? Number(r.avg_morning_login_hr) : null,
         avgMorningAtp:     r.avg_morning_atp     != null ? Number(r.avg_morning_atp)     : null,

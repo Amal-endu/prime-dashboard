@@ -4,11 +4,37 @@ import { NextResponse } from 'next/server'
 import { query } from '@/lib/supabase/sql'
 import { apiError, parseParamString, parseThreshold, parseWindowDays } from '@/lib/validators'
 
+type MatrixCell = { evening: number; cross: number; morning: number; total: number }
+type Matrix = Record<string, MatrixCell>
+
+function emptyMatrix(): Matrix {
+  return {
+    Regular:     { evening: 0, cross: 0, morning: 0, total: 0 },
+    Irregular:   { evening: 0, cross: 0, morning: 0, total: 0 },
+    'New Rider': { evening: 0, cross: 0, morning: 0, total: 0 },
+  }
+}
+
+function buildMatrix(rows: { regularity_tag: string; login_behaviour_tag: string; n: number }[]): Matrix {
+  const m = emptyMatrix()
+  for (const r of rows) {
+    const reg = r.regularity_tag
+    const beh = r.login_behaviour_tag
+    const n = Number(r.n)
+    if (!m[reg]) m[reg] = { evening: 0, cross: 0, morning: 0, total: 0 }
+    if (beh === 'Evening Rider')       m[reg].evening = n
+    else if (beh === 'Cross Utilised') m[reg].cross = n
+    else if (beh === 'Morning Rider')  m[reg].morning = n
+    m[reg].total += n
+  }
+  return m
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   try {
-    const city = parseParamString(searchParams.get('city'), 'city')
-    const hub = parseParamString(searchParams.get('hub'), 'hub')
+    const city   = parseParamString(searchParams.get('city'), 'city')
+    const hub    = parseParamString(searchParams.get('hub'), 'hub')
 
     const windowDays       = parseWindowDays(searchParams.get('windowDays'),       30)
     const newRiderDays     = parseWindowDays(searchParams.get('newRiderDays'),       7)
@@ -17,6 +43,7 @@ export async function GET(request: Request) {
     const regularThreshold = parseThreshold(searchParams.get('regularThreshold'),   80)
     const cfgParams: unknown[] = [windowDays, newRiderDays, eveningThreshold, crossThreshold, regularThreshold]
 
+    // Shared classification CTE — always uses full 30d window for L30D profile
     const classifyCte = `
 cfg AS (
   SELECT
@@ -72,59 +99,102 @@ rider_summary AS (
   FROM classified c LEFT JOIN hub_mapping hm ON LOWER(c.hub) = LOWER(hm.hub)
 )`
 
-    const cityList = await query<{ city: string }>(
-      'SELECT DISTINCT city FROM hub_mapping WHERE city IS NOT NULL ORDER BY city'
-    )
-
-    const hubList = city
-      ? await query<{ hub: string }>(
-          'SELECT DISTINCT hub FROM hub_mapping WHERE city = $1 ORDER BY hub',
-          [city],
-        )
-      : await query<{ hub: string }>('SELECT DISTINCT hub FROM hub_mapping ORDER BY hub')
-
+    // City/Hub filter
     const filterParams: unknown[] = []
     let where = 'WHERE 1=1'
     let paramIdx = 6
     if (city) { where += ` AND COALESCE(city, 'Unmapped') = $${paramIdx++}`; filterParams.push(city) }
     if (hub)  { where += ` AND hub = $${paramIdx++}`;                        filterParams.push(hub) }
 
-    const matrixRows = await query<{ regularity_tag: string; login_behaviour_tag: string; n: number }>(
-      `WITH ${classifyCte}
-  SELECT regularity_tag, login_behaviour_tag, COUNT(*) AS n
-  FROM rider_summary
-  ${where}
+    // City/hub option lists
+    const cityList = await query<{ city: string }>(
+      'SELECT DISTINCT city FROM hub_mapping WHERE city IS NOT NULL ORDER BY city'
+    )
+    const hubList = city
+      ? await query<{ hub: string }>('SELECT DISTINCT hub FROM hub_mapping WHERE city = $1 ORDER BY hub', [city])
+      : await query<{ hub: string }>('SELECT DISTINCT hub FROM hub_mapping ORDER BY hub')
+
+    // ── Helper: build matrix for a date window ────────────────────────────────
+    async function matrixForWindow(
+      startOffset: number, // days before anchor (inclusive start = further back)
+      endOffset: number,   // days before anchor (inclusive end = closer to anchor)
+      isAvg: boolean,      // true = return avg daily riders; false = return single-day count
+    ): Promise<{ matrix: Matrix; total: number }> {
+      const bucketParams: unknown[] = [...cfgParams, startOffset, endOffset, ...filterParams]
+      let bucketParamIdx = 6
+      const startParam = `$${bucketParamIdx++}`
+      const endParam   = `$${bucketParamIdx++}`
+
+      // Count riders per calendar day in the window (one rider appearing on 3 days = 3 rows here).
+      // Then average across the number of distinct dates in the bucket. This gives a true
+      // avg-daily-riders figure, consistent with how the main table reports avg/day.
+      const rows = await query<{ regularity_tag: string; login_behaviour_tag: string; n: number }>(
+        `WITH ${classifyCte},
+daily_riders AS (
+  -- one row per (date, rider) within the bucket window
+  SELECT rd.date, rs.rider_id, rs.regularity_tag, rs.login_behaviour_tag
+  FROM rider_daily rd
+  JOIN rider_summary rs ON rs.rider_id = rd.rider_id
+  CROSS JOIN anchor
+  WHERE rd.date BETWEEN (anchor.anchor_date - ${startParam}::INTEGER * INTERVAL '1 day')::DATE
+                    AND (anchor.anchor_date - ${endParam}::INTEGER * INTERVAL '1 day')::DATE
+  ${where.replace('WHERE 1=1', 'AND 1=1').replace(/\bcity\b/g, 'rs.city').replace(/\bhub\b/g, 'rs.hub').replace(/\blogin_behaviour_tag\b/g, 'rs.login_behaviour_tag').replace(/\bregularity_tag\b/g, 'rs.regularity_tag')}
+),
+bucket_date_count AS (
+  SELECT COUNT(DISTINCT date)::NUMERIC AS num_dates FROM daily_riders
+),
+bucket_agg AS (
+  SELECT regularity_tag, login_behaviour_tag,
+    COUNT(*)::NUMERIC AS login_events
+  FROM daily_riders
   GROUP BY regularity_tag, login_behaviour_tag
-  ORDER BY regularity_tag, login_behaviour_tag`,
-      [...cfgParams, ...filterParams],
-    )
+)
+SELECT regularity_tag, login_behaviour_tag,
+  CASE WHEN (SELECT num_dates FROM bucket_date_count) = 0 THEN 0
+       ELSE ROUND(login_events / (SELECT num_dates FROM bucket_date_count))
+  END AS n
+FROM bucket_agg`,
+        bucketParams,
+      )
 
-    const [{ n: scopeTotal }] = await query<{ n: number }>(
-      `WITH ${classifyCte}
-  SELECT COUNT(*) AS n FROM rider_summary ${where}`,
-      [...cfgParams, ...filterParams],
-    )
+      const [totalRow] = await query<{ n: number }>(
+        `WITH ${classifyCte},
+daily_riders AS (
+  SELECT rd.date, rs.rider_id
+  FROM rider_daily rd
+  JOIN rider_summary rs ON rs.rider_id = rd.rider_id
+  CROSS JOIN anchor
+  WHERE rd.date BETWEEN (anchor.anchor_date - ${startParam}::INTEGER * INTERVAL '1 day')::DATE
+                    AND (anchor.anchor_date - ${endParam}::INTEGER * INTERVAL '1 day')::DATE
+  ${where.replace('WHERE 1=1', 'AND 1=1').replace(/\bcity\b/g, 'rs.city').replace(/\bhub\b/g, 'rs.hub').replace(/\blogin_behaviour_tag\b/g, 'rs.login_behaviour_tag').replace(/\bregularity_tag\b/g, 'rs.regularity_tag')}
+),
+bucket_date_count AS (SELECT COUNT(DISTINCT date)::NUMERIC AS num_dates FROM daily_riders)
+SELECT CASE WHEN (SELECT num_dates FROM bucket_date_count) = 0 THEN 0
+            ELSE ROUND(COUNT(*)::NUMERIC / (SELECT num_dates FROM bucket_date_count))
+       END AS n
+FROM daily_riders`,
+        bucketParams,
+      )
 
-    type MatrixCell = { evening: number; cross: number; morning: number; total: number }
-    const matrix: Record<string, MatrixCell> = {
-      Regular:     { evening: 0, cross: 0, morning: 0, total: 0 },
-      Irregular:   { evening: 0, cross: 0, morning: 0, total: 0 },
-      'New Rider': { evening: 0, cross: 0, morning: 0, total: 0 },
+      const matrix = buildMatrix(rows)
+      const total = totalRow ? Number(totalRow.n) : 0
+      return { matrix, total }
     }
-    for (const r of matrixRows) {
-      const reg = r.regularity_tag
-      const beh = r.login_behaviour_tag
-      const n = Number(r.n)
-      if (!matrix[reg]) matrix[reg] = { evening: 0, cross: 0, morning: 0, total: 0 }
-      if (beh === 'Evening Rider')        matrix[reg].evening = n
-      else if (beh === 'Cross Utilised')  matrix[reg].cross = n
-      else if (beh === 'Morning Rider')   matrix[reg].morning = n
-      matrix[reg].total += n
-    }
+
+    // Fetch all 4 buckets in parallel:
+    // W-3: days 29..22 before anchor (oldest week, 8 days inclusive = days 22-29)
+    // W-2: days 21..15 before anchor
+    // W-1: days 14..8  before anchor
+    // D-1: days 1..1   before anchor (anchor - 1 = last data date)
+    const [w3, w2, w1, d1] = await Promise.all([
+      matrixForWindow(29, 22, true),  // W-3: days 22-29 before anchor (8 days)
+      matrixForWindow(21, 15, true),  // W-2: days 15-21 before anchor (7 days)
+      matrixForWindow(14,  8, true),  // W-1: days 8-14 before anchor (7 days)
+      matrixForWindow( 1,  1, false), // D-1: anchor minus 1 (single day)
+    ])
 
     return NextResponse.json({
-      matrix,
-      total: Number(scopeTotal),
+      weeks: { w3, w2, w1, d1 },
       cities: cityList.map(r => r.city),
       hubs: hubList.map(r => r.hub),
     })

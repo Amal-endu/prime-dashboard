@@ -20,9 +20,9 @@ export async function GET(request: Request) {
     // ATP productivity: avg attempts per login day (morning and evening separately)
     const [atp] = await query<Record<string, unknown>>(`
       SELECT
-        ROUND(AVG(CASE WHEN morning_runsheet_hour IS NOT NULL AND attempt_morning > 0
+        ROUND(AVG(CASE WHEN morning_runsheet_hour IS NOT NULL
           THEN attempt_morning END), 1) AS avg_atp_morning,
-        ROUND(AVG(CASE WHEN evening_runsheet_hour IS NOT NULL AND attempt_evening > 0
+        ROUND(AVG(CASE WHEN evening_runsheet_hour IS NOT NULL
           THEN attempt_evening END), 1) AS avg_atp_evening,
         ROUND(AVG(CASE WHEN morning_runsheet_hour IS NOT NULL
           THEN morning_runsheet_hour END), 1) AS avg_login_hour_morning,

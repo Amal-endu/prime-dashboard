@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   try {
     const city = parseParamString(searchParams.get('city'), 'city')
     const hub  = parseParamString(searchParams.get('hub'),  'hub')
+    const d1Only = searchParams.get('d1Only') === 'true'
 
     const windowDays       = parseWindowDays(searchParams.get('windowDays'),       30)
     const newRiderDays     = parseWindowDays(searchParams.get('newRiderDays'),       7)
@@ -27,6 +28,11 @@ cfg AS (
     $5::FLOAT   AS regular_threshold
 ),
 anchor AS (SELECT anchor_date FROM data_anchor WHERE id = 1),
+d1_riders AS (
+  SELECT DISTINCT rider_id
+  FROM rider_daily, anchor
+  WHERE date = anchor.anchor_date
+),
 rider_window AS (
   SELECT rd.rider_id, rd.rider_name, rd.hub, rd.date,
     CASE WHEN rd.morning_runsheet_hour IS NOT NULL THEN 1 ELSE 0 END AS had_morning_login,
@@ -35,6 +41,7 @@ rider_window AS (
   FROM rider_daily rd, anchor, cfg
   WHERE rd.date BETWEEN (anchor.anchor_date - (cfg.window_days - 1) * INTERVAL '1 day')::DATE
                     AND anchor.anchor_date
+    ${d1Only ? 'AND rd.rider_id IN (SELECT rider_id FROM d1_riders)' : ''}
 ),
 agg AS (
   SELECT rider_id, MAX(rider_name) AS rider_name, MAX(hub) AS hub,
