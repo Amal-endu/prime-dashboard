@@ -4,19 +4,31 @@ import { useState, useEffect } from 'react'
 import { X, RotateCcw, Save, CheckCircle2, AlertTriangle, Settings } from 'lucide-react'
 import { defaultConfig } from '@/lib/utils'
 import { useConfigState } from '@/components/config-provider'
-import type { Config } from '@/lib/types'
+import type { Config, AllocationMode } from '@/lib/types'
 
 interface FieldDef {
   key: keyof Config
   label: string
   description: string
-  type: 'number' | 'text'
+  type: 'number' | 'text' | 'allocation_mode'
   min?: number
   max?: number
   latency: 'instant' | 'ingest'
 }
 
 const SECTIONS: { title: string; fields: FieldDef[] }[] = [
+  {
+    title: 'Allocation Definition',
+    fields: [
+      {
+        key: 'allocationMode',
+        label: 'Total Allocation Mode',
+        description: 'Defines which AWBs count as "Total Allocation". Same-Day Received: only AWBs received at hub on the SDD file date (excludes carried-over stock). All OFD: all AWBs dispatched that day regardless of when they arrived.',
+        type: 'allocation_mode',
+        latency: 'ingest',
+      },
+    ],
+  },
   {
     title: 'Rider Classification',
     fields: [
@@ -150,16 +162,36 @@ export function ConfigDrawer({ open, onClose }: ConfigDrawerProps) {
                       <p className="text-[10px] text-slate-400 leading-relaxed">{field.description}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <input
-                        type={field.type === 'number' ? 'number' : 'text'}
-                        value={displayValue(field.key)}
-                        onChange={e => handleChange(field.key, e.target.value)}
-                        min={field.min}
-                        max={field.max}
-                        className="w-36 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light tabular-nums text-right"
-                      />
-                      {field.type === 'number' && field.min !== undefined && field.max !== undefined && (
-                        <p className="text-[10px] text-slate-400 mt-0.5">{field.min}–{field.max}</p>
+                      {field.type === 'allocation_mode' ? (
+                        <div className="flex flex-col gap-1.5 items-end">
+                          {(['same_day_received', 'all_ofd'] as AllocationMode[]).map(mode => (
+                            <button
+                              key={mode}
+                              onClick={() => handleChange(field.key, mode)}
+                              className={`px-2.5 py-1.5 text-[11px] font-medium rounded-lg border transition-colors w-44 text-left ${
+                                draft[field.key] === mode
+                                  ? 'bg-sfx-orange text-white border-sfx-orange-dark'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              {mode === 'same_day_received' ? 'Same-Day Received' : 'All OFD'}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type={field.type === 'number' ? 'number' : 'text'}
+                            value={displayValue(field.key)}
+                            onChange={e => handleChange(field.key, e.target.value)}
+                            min={field.min}
+                            max={field.max}
+                            className="w-36 px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sfx-orange/20 focus:border-sfx-orange-light tabular-nums text-right"
+                          />
+                          {field.type === 'number' && field.min !== undefined && field.max !== undefined && (
+                            <p className="text-[10px] text-slate-400 mt-0.5">{field.min}–{field.max}</p>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

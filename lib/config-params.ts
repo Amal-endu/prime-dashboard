@@ -8,5 +8,6 @@ export function toApiParams(config: Config): Record<string, string> {
     crossThreshold:   String(config.crossUtilEveningThreshold),
     regularThreshold: String(config.regularThreshold),
     mr3CutoffHour:    String(config.mr3CutoffHour),
+    allocationMode:   config.allocationMode ?? 'same_day_received',
   }
 }

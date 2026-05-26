@@ -158,6 +158,8 @@ export interface ClientDemand {
   trendPct: number
 }
 
+export type AllocationMode = 'all_ofd' | 'same_day_received'
+
 export interface Config {
   morningEveningCutoff: number
   analysisWindowDays: number
@@ -170,4 +172,5 @@ export interface Config {
   mr3CutoffHour: number
   delPctGreenThreshold: number
   delPctAmberThreshold: number
+  allocationMode: AllocationMode
 }

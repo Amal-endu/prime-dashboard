@@ -13,6 +13,7 @@ const { parse } = require('csv-parse/sync')
 
 const ROOT = path.join(__dirname, '..')
 const RAW_DATA_PATH = process.env.RAW_DATA_PATH || path.join(ROOT, 'raw_data.csv')
+const CLIENT_MAPPING_PATH = process.env.CLIENT_MAPPING_PATH || path.join(ROOT, 'Client_Mapping.csv')
 const MR3_CUTOFF = parseInt(process.env.MR3_CUTOFF_HOUR || '15', 10)
 const WINDOW_DAYS = parseInt(process.env.WINDOW_DAYS || '30', 10)
 
@@ -122,6 +123,7 @@ async function ingestRiderDaily() {
 // ── Ingest one SDD CSV → rider_day_shipments + client_day_shipments ───────────
 async function ingestSddCsv(filePath) {
   const filename = path.basename(filePath)
+  const sddDate = parseDateFromFilename(filename)  // e.g. "2026-05-24"
   const rows = parse(fs.readFileSync(filePath), { columns: true, skip_empty_lines: true })
 
   const pcRows = await query('SELECT client_name FROM prime_clients')
@@ -149,9 +151,14 @@ async function ingestSddCsv(filePath) {
     const clientName = (r.client_name || '').trim()
 
     const receivedTs = r.received_at_hub_time ? new Date(r.received_at_hub_time) : null
+    const receivedDate = receivedTs && !isNaN(receivedTs.getTime())
+      ? receivedTs.toISOString().slice(0, 10)
+      : null
     const is3mr = receivedTs && !isNaN(receivedTs.getTime())
       ? receivedTs.getHours() >= MR3_CUTOFF
       : false
+    // Same-day received: received_at_hub_time date matches the SDD file date
+    const isSddDate = sddDate !== null && receivedDate === sddDate
 
     const isDelivered = r.latest_status === 'DELIVERED'
     const isAttempted = ['DELIVERED', 'CID', 'NOT_CONTACTABLE'].includes(r.latest_status)
@@ -162,9 +169,11 @@ async function ingestSddCsv(filePath) {
       date, rider_id: riderId, hub,
       assigned_3mr: 0, attempted_3mr: 0, delivered_3mr: 0, breach_count_3mr: 0,
       assigned_overall: 0, attempted_overall: 0, delivered_overall: 0, breach_count_overall: 0,
+      assigned_sdd: 0,
     }
     const rd = riderDayMap[rKey]
     rd.assigned_overall++
+    if (isSddDate) rd.assigned_sdd++
     if (isAttempted) rd.attempted_overall++
     if (isDelivered) rd.delivered_overall++
     if (isBreach) rd.breach_count_overall++
@@ -202,24 +211,26 @@ async function ingestSddCsv(filePath) {
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK)
       const vals = chunk.map((rd, j) => {
-        const b = j * 11
-        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11})`
+        const b = j * 12
+        return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12})`
       }).join(',')
       const params = chunk.flatMap(rd => [
         rd.date, rd.rider_id, rd.hub,
         rd.assigned_3mr, rd.attempted_3mr, rd.delivered_3mr, rd.breach_count_3mr,
         rd.assigned_overall, rd.attempted_overall, rd.delivered_overall, rd.breach_count_overall,
+        rd.assigned_sdd,
       ])
       await query(`
         INSERT INTO rider_day_shipments
           (date, rider_id, hub, assigned_3mr, attempted_3mr, delivered_3mr, breach_count_3mr,
-           assigned_overall, attempted_overall, delivered_overall, breach_count_overall)
+           assigned_overall, attempted_overall, delivered_overall, breach_count_overall, assigned_sdd)
         VALUES ${vals}
         ON CONFLICT (date, rider_id, hub) DO UPDATE SET
           assigned_3mr = EXCLUDED.assigned_3mr, attempted_3mr = EXCLUDED.attempted_3mr,
           delivered_3mr = EXCLUDED.delivered_3mr, breach_count_3mr = EXCLUDED.breach_count_3mr,
           assigned_overall = EXCLUDED.assigned_overall, attempted_overall = EXCLUDED.attempted_overall,
-          delivered_overall = EXCLUDED.delivered_overall, breach_count_overall = EXCLUDED.breach_count_overall
+          delivered_overall = EXCLUDED.delivered_overall, breach_count_overall = EXCLUDED.breach_count_overall,
+          assigned_sdd = EXCLUDED.assigned_sdd
       `, params)
       progress('  → uploading rider rows', Math.min(i + CHUNK, rows.length), rows.length)
     }
@@ -260,12 +271,14 @@ async function refreshHubDayL8d() {
     INSERT INTO hub_day_l8d
       (date, hub, city, zone, riders_active,
        assigned_3mr, attempted_3mr, delivered_3mr, breach_count_3mr,
-       assigned_overall, attempted_overall, delivered_overall, breach_count_overall)
+       assigned_overall, attempted_overall, delivered_overall, breach_count_overall,
+       assigned_sdd)
     SELECT
       s.date, s.hub, COALESCE(hm.city, 'Unmapped') AS city, hm.zone,
       COUNT(DISTINCT s.rider_id) AS riders_active,
       SUM(s.assigned_3mr), SUM(s.attempted_3mr), SUM(s.delivered_3mr), SUM(s.breach_count_3mr),
-      SUM(s.assigned_overall), SUM(s.attempted_overall), SUM(s.delivered_overall), SUM(s.breach_count_overall)
+      SUM(s.assigned_overall), SUM(s.attempted_overall), SUM(s.delivered_overall), SUM(s.breach_count_overall),
+      SUM(s.assigned_sdd)
     FROM rider_day_shipments s
     LEFT JOIN hub_mapping hm ON LOWER(s.hub) = LOWER(hm.hub)
     WHERE s.date >= CURRENT_DATE - INTERVAL '8 days'
@@ -275,7 +288,8 @@ async function refreshHubDayL8d() {
       assigned_3mr = EXCLUDED.assigned_3mr, attempted_3mr = EXCLUDED.attempted_3mr,
       delivered_3mr = EXCLUDED.delivered_3mr, breach_count_3mr = EXCLUDED.breach_count_3mr,
       assigned_overall = EXCLUDED.assigned_overall, attempted_overall = EXCLUDED.attempted_overall,
-      delivered_overall = EXCLUDED.delivered_overall, breach_count_overall = EXCLUDED.breach_count_overall
+      delivered_overall = EXCLUDED.delivered_overall, breach_count_overall = EXCLUDED.breach_count_overall,
+      assigned_sdd = EXCLUDED.assigned_sdd
   `)
   console.log(' done')
 }
@@ -298,6 +312,29 @@ async function updateDataAnchor() {
   console.log(`data_anchor updated: rider_daily=${rd_max}, shipments=${sh_max}`)
 }
 
+async function ingestClientMapping() {
+  if (!fs.existsSync(CLIENT_MAPPING_PATH)) {
+    console.log('Client_Mapping.csv not found, skipping')
+    return
+  }
+  const rows = parse(fs.readFileSync(CLIENT_MAPPING_PATH), { columns: true, skip_empty_lines: true, bom: true })
+  const valid = rows.filter(r => r['Client Name'] && r['Client Name'].trim())
+  for (const r of valid) {
+    const name = r['Client Name'].trim()
+    const type = (r['Client Type'] || '').trim() || null
+    const bucket = (r['Client Bucket'] || '').trim() || null
+    const critical = ['true', 'yes', '1'].includes((r['Critical Clients'] || '').toLowerCase().trim())
+    await query(
+      `INSERT INTO client_mapping (client_name, client_type, client_bucket, critical_client)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (client_name) DO UPDATE SET
+         client_type=EXCLUDED.client_type, client_bucket=EXCLUDED.client_bucket, critical_client=EXCLUDED.critical_client`,
+      [name, type, bucket, critical]
+    )
+  }
+  console.log(`client_mapping: ${valid.length} rows upserted`)
+}
+
 async function main() {
   const force = process.argv.includes('--force')
 
@@ -309,6 +346,7 @@ async function main() {
 
   try {
     await ingestRiderDaily()
+    await ingestClientMapping()
 
     // Collect all CSV files across all SDD dirs
     const allFiles = []

@@ -17,11 +17,16 @@ interface TrendApiResponse {
 
 type MetricKey = 'totalOverall' | 'total3MR' | 'delPct3MR'
 
-const TABLE_CONFIG: { key: MetricKey; label: string; fmt: (v: number) => string; color: string }[] = [
-  { key: 'totalOverall', label: 'Total Allocation — Overall (all AWBs)', fmt: formatNumber, color: 'text-slate-700' },
-  { key: 'total3MR', label: 'Total Allocation — 3MR', fmt: formatNumber, color: 'text-sfx-orange-dark' },
-  { key: 'delPct3MR', label: 'DEL% — 3MR (Delivered / Assigned)', fmt: (v) => `${v.toFixed(1)}%`, color: 'text-emerald-600' },
-]
+function buildTableConfig(allocationMode?: string) {
+  const totalLabel = allocationMode === 'all_ofd'
+    ? 'Total Allocation — All OFD (any received date)'
+    : 'Total Allocation — Same-Day Received'
+  return [
+    { key: 'totalOverall' as MetricKey, label: totalLabel, fmt: formatNumber, color: 'text-slate-700' },
+    { key: 'total3MR' as MetricKey, label: 'Total Allocation — 3MR', fmt: formatNumber, color: 'text-sfx-orange-dark' },
+    { key: 'delPct3MR' as MetricKey, label: 'DEL% — 3MR (Delivered / Assigned)', fmt: (v: number) => `${v.toFixed(1)}%`, color: 'text-emerald-600' },
+  ]
+}
 
 function DeltaChip({ d1Val, avgVal }: { d1Val: number; avgVal: number }) {
   if (!avgVal || !d1Val) return <span className="text-slate-300 text-[10px]">—</span>
@@ -265,10 +270,13 @@ function DemandTable({ label, color, metricKey, fmt, dates, cities, total, total
 interface DemandTrendChartsProps {
   mr3CutoffHour?: number
   clientFilter?: string
-  primeOnly?: boolean
+  clientType?: string
+  clientBucket?: string
+  criticalOnly?: boolean
+  allocationMode?: string
 }
 
-export function DemandTrendCharts({ mr3CutoffHour, clientFilter, primeOnly }: DemandTrendChartsProps) {
+export function DemandTrendCharts({ mr3CutoffHour, clientFilter, clientType, clientBucket, criticalOnly, allocationMode }: DemandTrendChartsProps) {
   const [data, setData] = useState<TrendApiResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -277,12 +285,15 @@ export function DemandTrendCharts({ mr3CutoffHour, clientFilter, primeOnly }: De
     const params = new URLSearchParams()
     if (mr3CutoffHour !== undefined) params.set('mr3CutoffHour', String(mr3CutoffHour))
     if (clientFilter && clientFilter !== 'all') params.set('client', clientFilter)
-    if (primeOnly) params.set('prime', 'true')
+    if (clientType) params.set('clientType', clientType)
+    if (clientBucket) params.set('clientBucket', clientBucket)
+    if (criticalOnly) params.set('critical', 'true')
+    if (allocationMode) params.set('allocationMode', allocationMode)
     fetch(`/api/demand/trend?${params}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [mr3CutoffHour, clientFilter, primeOnly])
+  }, [mr3CutoffHour, clientFilter, clientType, clientBucket, criticalOnly, allocationMode])
 
   if (loading) {
     return (
@@ -295,6 +306,7 @@ export function DemandTrendCharts({ mr3CutoffHour, clientFilter, primeOnly }: De
   if (!data) return null
 
   const { dates, cities, total, totalWeekAvg } = data
+  const tableConfig = buildTableConfig(allocationMode)
 
   return (
     <div className="space-y-4">
@@ -302,7 +314,7 @@ export function DemandTrendCharts({ mr3CutoffHour, clientFilter, primeOnly }: De
         <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">8-Day Allocation Trend</h2>
         <span className="text-[10px] text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">D-1 vs D2–D8 avg</span>
       </div>
-      {TABLE_CONFIG.map(tc => (
+      {tableConfig.map(tc => (
         <DemandTable
           key={tc.key}
           label={tc.label}

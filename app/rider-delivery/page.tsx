@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, SlidersHorizontal, Loader2, Download } from 'lucide-react'
+import { ChevronRight, ChevronDown, SlidersHorizontal, AlertCircle, Loader2, Download } from 'lucide-react'
 import { StatCard } from '@/components/stat-card'
 import { BehaviourBadge, RegularityBadge } from '@/components/profile-badges'
 import { DelPctCell } from '@/components/del-pct-cell'
@@ -28,7 +28,9 @@ export default function RiderDeliveryPage() {
   const [datePreset, setDatePreset] = useState('today')
   const [behaviourFilter, setBehaviourFilter] = useState<string>('all')
   const [regularityFilter, setRegularityFilter] = useState<string>('all')
-  const [primeOnly, setPrimeOnly] = useState(false)
+  const [clientType, setClientType]     = useState('')
+  const [clientBucket, setClientBucket] = useState('')
+  const [criticalOnly, setCriticalOnly] = useState(false)
   const [expandedCities, setExpandedCities] = useState<Set<string>>(new Set())
   const [expandedHubs, setExpandedHubs] = useState<Set<string>>(new Set())
   const [sortCol, setSortCol] = useState<CitySortCol>('orders3MR')
@@ -44,13 +46,15 @@ export default function RiderDeliveryPage() {
     const params = new URLSearchParams({ date: datePreset })
     if (behaviourFilter !== 'all') params.set('behaviour', behaviourFilter)
     if (regularityFilter !== 'all') params.set('regularity', regularityFilter)
-    if (primeOnly) params.set('prime', 'true')
+    if (clientType)   params.set('clientType', clientType)
+    if (clientBucket) params.set('clientBucket', clientBucket)
+    if (criticalOnly) params.set('critical', 'true')
     Object.entries(toApiParams(config)).forEach(([k, v]) => params.set(k, v))
     fetch(`/api/delivery?${params}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); toast.completeOne() })
       .catch(() => { setLoading(false); toast.failAll() })
-  }, [datePreset, behaviourFilter, regularityFilter, primeOnly, configVersion])
+  }, [datePreset, behaviourFilter, regularityFilter, clientType, clientBucket, criticalOnly, configVersion])
 
   const toggleCity = (city: string) => setExpandedCities(prev => { const n = new Set(prev); n.has(city) ? n.delete(city) : n.add(city); return n })
   const toggleHub = (hub: string) => setExpandedHubs(prev => { const n = new Set(prev); n.has(hub) ? n.delete(hub) : n.add(hub); return n })
@@ -148,14 +152,33 @@ export default function RiderDeliveryPage() {
           <option value="all">All Regularity</option>
           {REGULARITY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
-        <button onClick={() => setPrimeOnly(p => !p)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all duration-200 ${primeOnly ? 'bg-[var(--sfx-orange)] text-white border-[var(--sfx-orange)] shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-[var(--sfx-orange-l)]'}`}>C2 Clients</button>
+        {/* Client segment filters */}
+        <button
+          onClick={() => setCriticalOnly(p => !p)}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all duration-200 flex items-center gap-1.5 ${criticalOnly ? 'bg-red-500 text-white border-red-500 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-red-300'}`}
+        >
+          <AlertCircle className="w-3 h-3" />Critical
+          {data?.filterMeta?.criticalCount > 0 && !criticalOnly && (
+            <span className="text-[10px] text-slate-400">({data.filterMeta.criticalCount})</span>
+          )}
+        </button>
+        <select value={clientType} onChange={e => setClientType(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
+          <option value="">All Types</option>
+          {(data?.filterMeta?.clientTypes ?? []).map((t: string) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={clientBucket} onChange={e => setClientBucket(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[var(--sfx-orange)]/15 focus:border-[var(--sfx-orange-l)] transition-shadow">
+          <option value="">All Buckets</option>
+          {(data?.filterMeta?.clientBuckets ?? []).map((b: string) => <option key={b} value={b}>{b}</option>)}
+        </select>
 
-        {(behaviourFilter !== 'all' || regularityFilter !== 'all' || primeOnly) && (
-          <div className="flex items-center gap-2">
+        {(behaviourFilter !== 'all' || regularityFilter !== 'all' || criticalOnly || clientType || clientBucket) && (
+          <div className="flex items-center gap-2 flex-wrap">
             {behaviourFilter !== 'all' && <span className="filter-chip">{behaviourFilter}<button onClick={() => setBehaviourFilter('all')}>×</button></span>}
             {regularityFilter !== 'all' && <span className="filter-chip">{regularityFilter}<button onClick={() => setRegularityFilter('all')}>×</button></span>}
-            {primeOnly && <span className="filter-chip">C2 Clients Only<button onClick={() => setPrimeOnly(false)}>×</button></span>}
-            <button onClick={() => { setBehaviourFilter('all'); setRegularityFilter('all'); setPrimeOnly(false) }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
+            {criticalOnly && <span className="filter-chip">Critical Only<button onClick={() => setCriticalOnly(false)}>×</button></span>}
+            {clientType && <span className="filter-chip">{clientType}<button onClick={() => setClientType('')}>×</button></span>}
+            {clientBucket && <span className="filter-chip">{clientBucket}<button onClick={() => setClientBucket('')}>×</button></span>}
+            <button onClick={() => { setBehaviourFilter('all'); setRegularityFilter('all'); setCriticalOnly(false); setClientType(''); setClientBucket('') }} className="text-[11px] text-slate-400 hover:text-slate-700 transition-colors">Clear all</button>
           </div>
         )}
 

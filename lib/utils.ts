@@ -37,6 +37,7 @@ export function defaultConfig(): Config {
     mr3CutoffHour: 15,
     delPctGreenThreshold: 80,
     delPctAmberThreshold: 60,
+    allocationMode: 'same_day_received',
   }
 }
 

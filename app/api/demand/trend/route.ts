@@ -27,74 +27,76 @@ type DayDemand = { totalOverall: number; total3MR: number; delPct3MR: number }
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   try {
-    const primeOnly = searchParams.get('prime') === 'true'
-    const clientFilter = searchParams.get('client')
-    const hasClientFilter = clientFilter && clientFilter !== 'all' && clientFilter !== ''
+    const clientFilter      = searchParams.get('client') ?? ''
+    const clientTypeFilter  = searchParams.get('clientType') ?? ''
+    const clientBucketFilter = searchParams.get('clientBucket') ?? ''
+    const criticalOnly      = searchParams.get('critical') === 'true'
+    const hasClientFilter   = !!(clientFilter && clientFilter !== 'all')
+    const hasSegmentFilter  = criticalOnly || !!clientTypeFilter || !!clientBucketFilter
+    const allocationMode    = searchParams.get('allocationMode') === 'all_ofd' ? 'all_ofd' : 'same_day_received'
+    const totalDemandCol    = allocationMode === 'same_day_received' ? 'assigned_sdd' : 'assigned_overall'
 
     const [anchor] = await query<{ anchor_date: string }>(
       'SELECT anchor_date::TEXT AS anchor_date FROM data_anchor WHERE id = 1'
     )
     const maxDate = new Date(anchor.anchor_date)
 
-    // 8 days: D-1 (today/anchor) through D-8
     const days = Array.from({ length: 8 }, (_, i) => ({ ...dateLabel(offset(maxDate, i)), idx: i }))
     const dateStrings = days.map(d => d.date)
     const placeholders = dateStrings.map((_, i) => `$${i + 1}`).join(',')
 
-    // City-level overall and 3MR demand from hub_day_l8d
-    // primeOnly and clientFilter are not filterable at city level (pre-aggregated)
-    // client view uses client_day_shipments instead
-    const cityRows = await query<{ city: string; date: string; total_overall: number; total_3mr: number; delivered_3mr: number }>(
-      `SELECT
-        city,
-        date::TEXT AS date,
-        SUM(assigned_overall) AS total_overall,
-        SUM(assigned_3mr)     AS total_3mr,
-        SUM(delivered_3mr)    AS delivered_3mr
-       FROM hub_day_l8d
-       WHERE date IN (${placeholders})
-       GROUP BY city, date
-       ORDER BY city, date`,
-      dateStrings
-    )
-
-    // Client-level trend (used when clientFilter is set or primeOnly)
-    let clientRows: { date: string; total_3mr: number; delivered_3mr: number; total_overall: number }[] = []
-    if (hasClientFilter || primeOnly) {
-      const primeFilter = primeOnly ? 'AND is_prime = TRUE' : ''
-      const clientWhere = hasClientFilter ? `AND LOWER(client_name) = LOWER($${dateStrings.length + 1})` : ''
-      const params: unknown[] = [...dateStrings]
-      if (hasClientFilter) params.push(clientFilter)
-      clientRows = await query(
-        `SELECT
-          date::TEXT AS date,
-          SUM(awbs_3mr)      AS total_3mr,
-          SUM(delivered_3mr) AS delivered_3mr,
-          SUM(awbs_overall)  AS total_overall
-         FROM client_day_shipments
-         WHERE date IN (${placeholders})
-           AND client_name IS NOT NULL
-           ${primeFilter}
-           ${clientWhere}
-         GROUP BY date
-         ORDER BY date`,
-        params
-      )
-    }
-
     const overallMap: Record<string, Record<string, number>> = {}
     const mr3Map: Record<string, Record<string, { total: number; delivered: number }>> = {}
 
-    if (hasClientFilter || primeOnly) {
-      // Flatten filtered client data under a synthetic city "Filtered"
-      const filteredCity = hasClientFilter ? (clientFilter as string) : 'Prime'
-      overallMap[filteredCity] = {}
-      mr3Map[filteredCity] = {}
+    if (hasClientFilter || hasSegmentFilter) {
+      // Filtered: use client_day_shipments + client_mapping
+      const needsMapping = criticalOnly || !!clientTypeFilter || !!clientBucketFilter
+      const cmJoin = needsMapping
+        ? `LEFT JOIN client_mapping cm ON LOWER(cds.client_name) = LOWER(cm.client_name)`
+        : ''
+
+      const segClauses: string[] = []
+      const segParams: unknown[] = [...dateStrings]
+      let pIdx = dateStrings.length + 1
+
+      if (criticalOnly)       segClauses.push(`cm.critical_client = TRUE`)
+      if (clientTypeFilter)   { segClauses.push(`cm.client_type = $${pIdx++}`);   segParams.push(clientTypeFilter) }
+      if (clientBucketFilter) { segClauses.push(`cm.client_bucket = $${pIdx++}`); segParams.push(clientBucketFilter) }
+      if (hasClientFilter)    { segClauses.push(`LOWER(cds.client_name) = LOWER($${pIdx++})`); segParams.push(clientFilter) }
+
+      const segWhere = segClauses.length ? 'AND ' + segClauses.join(' AND ') : ''
+
+      const clientRows = await query<{ date: string; total_3mr: number; delivered_3mr: number; total_overall: number }>(
+        `SELECT
+          cds.date::TEXT AS date,
+          SUM(cds.awbs_3mr) AS total_3mr, SUM(cds.delivered_3mr) AS delivered_3mr,
+          SUM(cds.awbs_overall) AS total_overall
+         FROM client_day_shipments cds
+         ${cmJoin}
+         WHERE cds.date IN (${placeholders}) AND cds.client_name IS NOT NULL
+         ${segWhere}
+         GROUP BY cds.date ORDER BY cds.date`,
+        segParams
+      )
+
+      // Label for the synthetic city shown in the chart
+      const label = criticalOnly ? 'Critical' : clientTypeFilter || clientBucketFilter || (clientFilter as string)
+      overallMap[label] = {}
+      mr3Map[label] = {}
       for (const r of clientRows) {
-        overallMap[filteredCity][r.date] = Number(r.total_overall)
-        mr3Map[filteredCity][r.date] = { total: Number(r.total_3mr), delivered: Number(r.delivered_3mr) }
+        overallMap[label][r.date] = Number(r.total_overall)
+        mr3Map[label][r.date] = { total: Number(r.total_3mr), delivered: Number(r.delivered_3mr) }
       }
     } else {
+      // Unfiltered: city-level from hub_day_l8d
+      const cityRows = await query<{ city: string; date: string; total_overall: number; total_3mr: number; delivered_3mr: number }>(
+        `SELECT city, date::TEXT AS date,
+          SUM(${totalDemandCol}) AS total_overall, SUM(assigned_3mr) AS total_3mr, SUM(delivered_3mr) AS delivered_3mr
+         FROM hub_day_l8d
+         WHERE date IN (${placeholders})
+         GROUP BY city, date ORDER BY city, date`,
+        dateStrings
+      )
       for (const r of cityRows) {
         if (!overallMap[r.city]) overallMap[r.city] = {}
         overallMap[r.city][r.date] = Number(r.total_overall)
